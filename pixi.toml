@@ -1,0 +1,203 @@
+[workspace]
+name = "iter-radiation-load"
+description = "Workspace and scripts for ITER radiation-load calculations"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64", "osx-64"]
+preview = ["pixi-build"]
+
+[workspace.build-variants]
+python = [
+  "3.11.*",
+  "3.12.*",
+  "3.13.*",
+  "3.14.*",
+  "3.15.*",
+]
+
+[dependencies]
+cherab-iter = { git = "https://github.com/cherab/iter.git", branch = "develop" }
+# 0.8.1 fixes radiation emitter definition.
+cherab-imas = { git = "https://github.com/cherab/imas.git", branch = "develop" }
+xarray = "*"
+jinja2 = ">=3.1,<4"
+imas-core = "*"  # HDF5/UDA backend required by the radiation IDS workflow.
+
+# Task args are the only public argument definitions.
+# Descriptions summarise the task; inline args comments explain argument semantics.
+# Empty optional values inherit the workflow TOML, unless documented otherwise.
+# Values cross the script boundary through env to preserve literal paths.
+# Task caching is intentionally disabled for creation, external data and job submission.
+
+[tasks.prepare-wall]
+description = "🧱 Create a deduplicated IMAS HDF5 wall entry from STL components."
+args = [
+  "mesh_dir",  # Required: directory containing the input STL component files.
+  "output",  # Required: new HDF5 entry directory, not an IMAS URI; must not exist.
+  { arg = "stl_scaling", default = "0.001" },  # Coordinate multiplier to convert STL units to metres.
+  { arg = "flip_normals", default = "false", choices = ["false", "true"] },  # Reverse triangle winding.
+  { arg = "dd_version", default = "4.1.1" },  # IMAS Data Dictionary version for the new wall IDS.
+]
+cmd = "python scripts/prepare_wall.py"
+env = {
+  RADLOAD_MESH_DIR = "{{ mesh_dir }}",
+  RADLOAD_OUTPUT = "{{ output }}",
+  RADLOAD_STL_SCALING = "{{ stl_scaling }}",
+  RADLOAD_FLIP_NORMALS = "{{ flip_normals }}",
+  RADLOAD_DD_VERSION = "{{ dd_version }}",
+}
+# No dependencies: existing wall IDS users do not run this creation task.
+
+[tasks.check-config]
+description = "⚙️ Check TOML settings and optionally save the resolved configuration."
+args = [
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML; IDS data is not loaded.
+  { arg = "output", default = "" },  # Optional new TOML snapshot file; empty: only check and report.
+]
+cmd = "python scripts/check_config.py"
+env = { RADLOAD_CONFIG = "{{ config }}", RADLOAD_OUTPUT = "{{ output }}" }
+
+# Inputs stay immutable; each new output entry has one writer.
+# IMAS Core tries RDWR even for read opens, so disable HDF5 locks for concurrent readers.
+[tasks.validate]
+description = "🔍 Validate scene setup and result I/O; save the scenegraph and optionally probe rays."
+args = [
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML used for the full validation.
+  { arg = "probe_samples", default = "0" },  # Total sample budget across all components; 0: skip ray tracing.
+  { arg = "report_dir", default = "" },  # New directory for reports and scenegraph.txt; empty: automatic.
+]
+cmd = "python scripts/validate.py"
+env = {
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_CONFIG = "{{ config }}",
+  RADLOAD_PROBE_SAMPLES = "{{ probe_samples }}",
+  RADLOAD_REPORT_DIR = "{{ report_dir }}",
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  PYTHONUNBUFFERED = "1",
+}
+
+[tasks.render]
+description = "🎯 Render one component in the current environment and save its wall IDS."
+args = [
+  "component",  # Required: grid_subset component name in geometry.target's wall IDS.
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML for this calculation.
+  { arg = "output_uri", default = "" },  # New imas:hdf5?path=... entry; empty: use output.uri.
+  { arg = "workers", default = "" },  # Render processes; empty: SLURM_CPUS_PER_TASK or 1.
+]
+cmd = "python scripts/render.py"
+env = {
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_COMPONENT = "{{ component }}",
+  RADLOAD_CONFIG = "{{ config }}",
+  RADLOAD_OUTPUT_URI = "{{ output_uri }}",
+  RADLOAD_WORKERS = "{{ workers }}",
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  PYTHONUNBUFFERED = "1",
+}
+
+[tasks.render-component]
+description = "🧩 Worker subtask: render one component and retain intermediate results for merge."
+args = [
+  "component",  # Required: component name included in the frozen run manifest.
+  "run_dir",  # Required: run directory containing config.toml and run.json.
+  { arg = "workers", default = "" },  # Render processes; empty: SLURM_CPUS_PER_TASK or 1.
+]
+cmd = "python scripts/render_component.py"
+env = {
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_COMPONENT = "{{ component }}",
+  RADLOAD_RUN_DIR = "{{ run_dir }}",
+  RADLOAD_WORKERS = "{{ workers }}",
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  NUMEXPR_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1",
+  PYTHONUNBUFFERED = "1",
+}
+
+[tasks.submit]
+description = "🚀 Generate Slurm scripts for review, or submit all components with an afterok merge."
+args = [
+  { arg = "mode", default = "preview", choices = ["preview", "submit"] },  # Generate concrete scripts for review, or generate and submit jobs.
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML; all target components are submitted.
+  { arg = "work_dir", default = "" },  # New shared run directory; empty: allocate under output.work_directory or use temporary storage.
+  { arg = "cpus_per_task", default = "" },  # CPUs per component job; empty: use slurm.cpus_per_task.
+  { arg = "partition", default = "" },  # Slurm partition; empty: use slurm.partition.
+  { arg = "time", default = "" },  # Slurm time limit; empty: use slurm.time.
+]
+cmd = "python scripts/submit.py"
+env = {
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_SUBMIT_MODE = "{{ mode }}",
+  RADLOAD_CONFIG = "{{ config }}",
+  RADLOAD_WORK_DIR = "{{ work_dir }}",
+  RADLOAD_CPUS_PER_TASK = "{{ cpus_per_task }}",
+  RADLOAD_PARTITION = "{{ partition }}",
+  RADLOAD_TIME = "{{ time }}",
+}
+
+[tasks.merge]
+description = "🔗 Merge component results into one HDF5 wall IDS and clean temporary files on success."
+args = [
+  "run_dir",  # Required: run directory containing the planned components and their results.
+  { arg = "config", default = "" },  # Workflow TOML; empty: use run_dir/config.toml.
+  { arg = "output_uri", default = "" },  # New imas:hdf5?path=... entry; empty: use output.uri.
+]
+cmd = "python scripts/merge.py"
+env = {
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_RUN_DIR = "{{ run_dir }}",
+  RADLOAD_CONFIG = "{{ config }}",
+  RADLOAD_OUTPUT_URI = "{{ output_uri }}",
+}
+
+[feature.lint.dependencies]
+ruff = "*"
+shellcheck = "*"
+tombi = "*"
+pyrefly = "*"
+
+[feature.lint.tasks]
+lint = {
+  cmd = "ruff check scripts",
+  description = "🧹 Check workflow scripts with Ruff.",
+}
+
+[feature.visualize.dependencies]
+paraview = "*"
+hdf5 = "<2"
+vtk-base = ">=9.1"
+imas-python = "*"
+
+[feature.visualize.pypi-dependencies]
+imas-paraview = { version = "==2.4.0", extras = ["standalone"] }
+
+[feature.visualize.tasks.paraview]
+description = "🖥️ Launch ParaView with IMAS plugins enabled."
+cmd = "paraview"
+env = {
+  PV_PLUGIN_PATH = "$(python -c 'import imas_paraview; print(imas_paraview.__path__[0])')/plugins",
+}
+
+[environments]
+default = {
+  features = ["default"],
+  solve-group = "main",
+}
+lint = {
+  features = ["lint"],
+  no-default-feature = true,
+}
+visualize = {
+  features = ["visualize"],
+  no-default-feature = true,
+  # solve-group = "main"
+}
