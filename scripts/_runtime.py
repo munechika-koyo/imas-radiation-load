@@ -44,7 +44,7 @@ def write_component_inputs(
 
 
 def render_component(config: Config, component: str, directory: Path, workers: int) -> bool:
-    """Calculate one planned component and leave final IDS assembly to the caller."""
+    """Calculate one planned component and return convergence; the pass limit is a valid stop."""
     if workers < 1:
         raise ValueError("workers must be positive")
     manifest = load_run(directory)

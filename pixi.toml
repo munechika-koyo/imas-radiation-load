@@ -80,7 +80,7 @@ env = {
 }
 
 [tasks.render]
-description = "🎯 Render one component in the current environment and save its wall IDS."
+description = "🎯 Render one component up to its pass limit; save wall IDS estimates and VTK errors."
 args = [
   "component",  # Required: grid_subset component name in geometry.target's wall IDS.
   { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML for this calculation.
@@ -145,7 +145,7 @@ env = {
 }
 
 [tasks.merge]
-description = "🔗 Merge component results into one HDF5 wall IDS and clean temporary files on success."
+description = "🔗 Save finished estimates, VTK errors and convergence records; clean temporary files."
 args = [
   "run_dir",  # Required: run directory containing the planned components and their results.
   { arg = "config", default = "" },  # Workflow TOML; empty: use run_dir/config.toml.

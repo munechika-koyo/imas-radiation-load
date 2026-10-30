@@ -35,8 +35,7 @@ def main() -> int:
     config, directory = create_run(config, geometry, [component])
     print(f"Work directory: {directory}; final output: {config.output.uri}", flush=True)
     if not render_component(config, component, directory, workers):
-        print(f"Not converged; intermediate results retained in {directory}", flush=True)
-        return 2
+        print("Pass limit reached; saving final estimates with their standard errors.", flush=True)
     print(f"Wall IDS: {merge_results(config, directory)}", flush=True)
     remove_temporary_workspace(directory, config.output.uri)
     return 0

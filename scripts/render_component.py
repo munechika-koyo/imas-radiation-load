@@ -13,7 +13,10 @@ def main() -> int:
     directory = Path(values["RADLOAD_RUN_DIR"]).expanduser().resolve()
     config = load_config(directory / "config.toml")
     workers = int(values["RADLOAD_WORKERS"] or os.environ.get("SLURM_CPUS_PER_TASK", "1"))
-    return 0 if render_component(config, values["RADLOAD_COMPONENT"], directory, workers) else 2
+    converged = render_component(config, values["RADLOAD_COMPONENT"], directory, workers)
+    if not converged:
+        print("Pass limit reached; final estimates and standard errors saved.", flush=True)
+    return 0
 
 
 if __name__ == "__main__":

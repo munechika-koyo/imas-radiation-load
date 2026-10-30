@@ -26,7 +26,7 @@ from _configuration import (
     load_config,
     require_runtime,
 )
-from _workspace import load_run
+from _workspace import load_run, write_json
 
 
 def file_digest(path: Path) -> str:
@@ -186,7 +186,7 @@ def wall_geometry(config: Config) -> dict:
 
 
 def merge_results(config: Config, run_directory: Path, *, validation: bool = False) -> str:
-    """Assemble converged per-part results into a new wall IDS using one writer."""
+    """Assemble finished estimates, uncertainties and convergence records using one writer."""
     require_runtime(config)
     geometry = wall_geometry(config)
     manifest = load_run(run_directory, validation=validation)
@@ -201,6 +201,12 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
     if unexpected:
         raise ValueError(f"Unexpected component results: {sorted(unexpected)}")
     values: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    sampling: dict = dict(
+        max_passes=config.render.max_passes,
+        adaptive_cutoff=config.render.adaptive_cutoff,
+        uncertainty="1-sigma Monte Carlo standard error of the mean [W m-2]",
+        components={},
+    )
     source_info: dict | None = None
     for name in targets:
         directory = run_directory / name
@@ -209,8 +215,23 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
             raise ValueError(f"{name}: component does not exist in the source wall IDS")
         if identity != dict(source=geometry["source"], part=name, **geometry["parts"][name]):
             raise ValueError(f"{name}: wall identity/triangle order does not match the result")
-        if not json.loads((directory / "status.json").read_text())["complete"]:
-            raise ValueError(f"{name}: refusing to store unconverged radiation loads")
+        status = json.loads((directory / "status.json").read_text())
+        render_pass = status["render_pass"]
+        # Older workers used complete solely for convergence and exited 2 at the cap.
+        legacy = "converged" not in status
+        converged = status.get("converged", status["complete"])
+        finished = status["complete"] or (legacy and render_pass == config.render.max_passes)
+        if (
+            not finished
+            or not isinstance(converged, bool)
+            or not isinstance(render_pass, int)
+            or render_pass < (0 if validation else 1)
+            or render_pass > config.render.max_passes
+            or (not converged and render_pass != config.render.max_passes)
+        ):
+            raise ValueError(f"{name}: results must be converged or have reached max_passes")
+        if not (directory / "power_density.vtk").is_file():
+            raise FileNotFoundError(f"{name}: the VTK result with standard errors is missing")
         recorded = load_config(directory / "config.toml")
         if (
             recorded.plasma != config.plasma
@@ -231,9 +252,11 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         source_info = component_source
         with np.load(directory / "power_density.npz") as data:
             density, error = data["power_density"].copy(), data["power_density_error"].copy()
+            samples = data["samples"].copy()
         if (
             density.shape != (geometry["parts"][name]["triangle_count"],)
             or error.shape != density.shape
+            or samples.shape != density.shape
         ):
             raise ValueError(f"{name}: wrong number of triangle values")
         if (
@@ -241,9 +264,18 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
             or not np.isfinite(error).all()
             or np.any(density < 0)
             or np.any(error < 0)
+            or not np.issubdtype(samples.dtype, np.integer)
+            or np.any(samples < 1)
         ):
             raise ValueError(f"{name}: results must be finite and nonnegative")
         values[name] = density, error
+        sampling["components"][name] = dict(
+            converged=converged,
+            stop_reason="converged" if converged else "max_passes",
+            render_pass=render_pass,
+            samples_min=int(samples.min()),
+            samples_max=int(samples.max()),
+        )
     assert source_info is not None
     time = float(source_info["time"])
     if not np.isfinite(time):
@@ -284,6 +316,8 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         + "Absorbing non-emitting surfaces: incident radiation equals net radiation; "
         "particle heat flux, wall thermal emission and reflection are excluded. Units W m-2. "
         "Symmetric values_error_upper/lower are 1-sigma Monte Carlo standard errors. "
+        "Estimates are saved even when max_passes is reached before convergence. "
+        f"Sampling: {json.dumps(sampling, sort_keys=True)}. "
         "Only measured subsets have values; unmeasured subset entries have empty values. "
         f"Reference wall geometry; {target.num_segments} toroidal placements were used for occlusion. "
         f"Wall source: {json.dumps(geometry['source'], sort_keys=True)}. "
@@ -293,6 +327,12 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
     wall.code.version = "0.1.0"
     _write_wall(wall, config.output.uri, occurrence=config.output.occurrence)
     verify_wall_results(config, geometry, values, time)
+    output = hdf5_entry_path(config.output.uri)
+    vtk_directory = output / "vtk"
+    vtk_directory.mkdir()
+    for name in targets:
+        shutil.copyfile(run_directory / name / "power_density.vtk", vtk_directory / f"{name}.vtk")
+    write_json(output / "rendering.json", sampling)
     return config.output.uri
 
 

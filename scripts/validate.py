@@ -107,8 +107,17 @@ def main() -> int:
                 max(p["triangle_count"] for p in geometry["parts"].values()) + 1
             ) + np.arange(count, dtype=float)
             error = density / 1024.0
+            # Exercise both stopping reasons with explicitly marked synthetic validation data.
+            converged = index % 2 == 0
             save_results(
-                directory, mesh, density, error, np.full(count, 2), complete=True, render_pass=0
+                directory,
+                mesh,
+                density,
+                error,
+                np.full(count, 2),
+                complete=True,
+                converged=converged,
+                render_pass=0 if converged else config.render.max_passes,
             )
             with np.load(directory / "power_density.npz") as data:
                 if not np.array_equal(data["power_density"], density) or not np.array_equal(

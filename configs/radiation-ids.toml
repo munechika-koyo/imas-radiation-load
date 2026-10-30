@@ -55,6 +55,7 @@ surface_offset = 1e-6  # observer offset along the triangle normal [m]
 pixel_samples = 250
 min_samples = 1000
 max_passes = 500
+# Stop early on convergence, otherwise save estimates at this fixed pass limit.
 adaptive_fraction = 0.2
 adaptive_ratio = 25.0
 adaptive_cutoff = 0.1
@@ -62,6 +63,8 @@ save_every = 10
 
 [output]
 uri = "imas:hdf5?path=../results/radiation-ids"
+# The entry also retains vtk/<component>.vtk (PowerDensity/PowerDensityError)
+# and rendering.json with per-component convergence and sampling information.
 # occurrence = 0
 # Intermediate files use an automatic temporary directory beside the final entry.
 # Merge success removes it; failures retain it for inspection or retry.
