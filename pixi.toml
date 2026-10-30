@@ -18,6 +18,7 @@ python = [
 cherab-iter = { git = "https://github.com/cherab/iter.git", branch = "develop" }
 # 0.8.1 fixes radiation emitter definition.
 cherab-imas = { git = "https://github.com/cherab/imas.git", branch = "develop" }
+cherab-stubs = "*"
 xarray = "*"
 jinja2 = ">=3.1,<4"
 imas-core = "*"  # HDF5/UDA backend required by the radiation IDS workflow.
