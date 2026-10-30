@@ -1,10 +1,11 @@
 # ITER radiation load
 
-IMAS wall IDSを基に、部品ごとのradiation loadを計算するアプリケーションです。
+An application for calculating the radiation load on individual components using an IMAS wall IDS.
 
-## タスクリスト
+## Available tasks
 
-workspaceとworkflowは [`pixi`](https://pixi.sh) で管理されており、定義されたタスクは以下のコマンドで確認できます。
+The workspace and workflows are managed with [`pixi`](https://pixi.sh).
+List the available tasks with:
 
 ```sh
 pixi task list

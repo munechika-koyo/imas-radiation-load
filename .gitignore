@@ -220,6 +220,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Specific to this project
+/TODO.md
 data/*
 results/*
 configs/local*.toml
