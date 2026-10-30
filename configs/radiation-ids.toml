@@ -1,0 +1,88 @@
+# Configuration template for total-power rendering from radiation IDS.
+# Paths are resolved relative to this file.
+
+[emitter]
+kind = "radiation_ids"
+integration_step = 1e-3  # volume integration step [m]
+
+[radiation]
+# Two sources require values; auto/coefficients are allowed with one source only.
+emissivity_source = "values"
+time_threshold = inf  # common nearest-slice tolerance for both sources [s]
+grid_subset_id = 5
+interpolator_cache = "disk"
+# interpolator_cache_dir = "../data/interpolator_cache"
+# Omit process_indices to sum all available processes in each source.
+# The same process filter applies to both sources.
+# Select mutually exclusive processes to avoid double counting.
+# process_indices = [901]
+# Blending uses the API's default equilibrium.inside_lcfs mask.
+
+[radiation.primary]
+# Typically core profiles; the primary source may instead provide GGD values.
+uri = "imas:hdf5?path=/path/to/core_radiation"
+time = 480.0
+occurrence = 0
+kwargs = {}  # DBEntry options only, e.g. { dd_version = "4.1.1" }
+
+# Omit this entire table for a single-source emitter.
+# The secondary source supplies the missing core or GGD component.
+# [radiation.secondary]
+# uri = "imas:hdf5?path=/path/to/edge_radiation"
+# occurrence = 0  # independent of primary.occurrence
+# kwargs = {}  # independent of primary.kwargs
+# Omit time to use primary.time; an explicit 0.0 must remain zero.
+# time = 480.0
+
+[geometry.target]
+# Measure each grid_subset in the original segment; copies only occlude rays.
+uri = "imas:hdf5?path=../data/divertor_wall"
+description_index = 0
+occurrence = 0
+time = 0.0
+num_segments = 1  # total including original; increase to replicate a toroidal sector
+
+# Repeat this table for each additional geometry source; omit if none are needed.
+[[geometry.non_targets]]
+name = "first_wall"
+uri = "imas:hdf5?path=/path/to/first_wall"
+num_segments = 1  # default; use 1 for geometry that already spans the full torus
+# description_index, occurrence and time default to 0, 0 and 0.0.
+
+[render]
+surface_offset = 1e-6  # observer offset along the triangle normal [m]
+# Total power has no physical wavelength bins or bands.
+pixel_samples = 250
+min_samples = 1000
+max_passes = 500
+adaptive_fraction = 0.2
+adaptive_ratio = 25.0
+adaptive_cutoff = 0.1
+save_every = 10
+
+[output]
+uri = "imas:hdf5?path=../results/radiation-ids"
+# occurrence = 0
+# Intermediate files use an automatic temporary directory beside the final entry.
+# Merge success removes it; failures retain it for inspection or retry.
+# Set work_directory to retain intermediate files after a successful merge.
+# work_directory = "../results/radiation-ids-work"
+
+[slurm]
+job_template = "../jobs/slurm.sh.j2"
+working_directory = ".."
+cpus_per_task = 56
+partition = "vega"
+time = "infinite"
+
+# Optional per-job resource and logging settings.
+# memory = "32G"
+# account = "your-project"
+# qos = "your-qos"
+# stdout = "/scratch/users/%u/radload-%x-%j.out"
+# stderr = "/scratch/users/%u/radload-%x-%j.err"
+
+[slurm.merge]
+cpus_per_task = 1
+# memory = "16G"
+# time = "01:00:00"
