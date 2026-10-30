@@ -1,0 +1,10 @@
+#!/bin/bash -l
+{% for option, value in options.items() %}
+#SBATCH --{{ option }}={{ value | quote }}
+{% endfor %}
+set -euo pipefail
+
+# All paths and task arguments are frozen when this script is generated.
+# Site-specific module/environment setup may be added here.
+cd -- {{ working_directory | quote }}
+exec {{ command }}
