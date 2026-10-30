@@ -220,6 +220,7 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         # Older workers used complete solely for convergence and exited 2 at the cap.
         legacy = "converged" not in status
         converged = status.get("converged", status["complete"])
+        user_stopped = status.get("stop_reason") == "user_stop" and status["complete"]
         finished = status["complete"] or (legacy and render_pass == config.render.max_passes)
         if (
             not finished
@@ -227,9 +228,11 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
             or not isinstance(render_pass, int)
             or render_pass < (0 if validation else 1)
             or render_pass > config.render.max_passes
-            or (not converged and render_pass != config.render.max_passes)
+            or (not converged and not user_stopped and render_pass != config.render.max_passes)
         ):
-            raise ValueError(f"{name}: results must be converged or have reached max_passes")
+            raise ValueError(
+                f"{name}: results must be converged, pass-limited, or explicitly stopped by the user"
+            )
         if not (directory / "power_density.vtk").is_file():
             raise FileNotFoundError(f"{name}: the VTK result with standard errors is missing")
         recorded = load_config(directory / "config.toml")
@@ -271,7 +274,7 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         values[name] = density, error
         sampling["components"][name] = dict(
             converged=converged,
-            stop_reason="converged" if converged else "max_passes",
+            stop_reason="converged" if converged else "user_stop" if user_stopped else "max_passes",
             render_pass=render_pass,
             samples_min=int(samples.min()),
             samples_max=int(samples.max()),
@@ -316,7 +319,7 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         + "Absorbing non-emitting surfaces: incident radiation equals net radiation; "
         "particle heat flux, wall thermal emission and reflection are excluded. Units W m-2. "
         "Symmetric values_error_upper/lower are 1-sigma Monte Carlo standard errors. "
-        "Estimates are saved even when max_passes is reached before convergence. "
+        "Estimates are saved at max_passes or an explicit user stop, even before convergence. "
         f"Sampling: {json.dumps(sampling, sort_keys=True)}. "
         "Only measured subsets have values; unmeasured subset entries have empty values. "
         f"Reference wall geometry; {target.num_segments} toroidal placements were used for occlusion. "
