@@ -70,7 +70,7 @@ def write_job(
         if value is not None:
             options[option] = value
     if dependency is not None:
-        options.update(dependency=f"afterok:{dependency}", **{"kill-on-invalid-dep": "yes"})
+        options.update(dependency=dependency, **{"kill-on-invalid-dep": "yes"})
     if any(any(character in str(value) for character in "\r\n\0") for value in options.values()):
         raise ValueError("SBATCH directive values must be single-line strings")
     command = shlex.join(

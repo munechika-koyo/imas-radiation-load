@@ -88,7 +88,7 @@ def main() -> int:
             "merge",
             [str(directory)],
             merge=True,
-            dependency="PENDING_COMPONENT_JOB_IDS",
+            dependency="afterok:PENDING_COMPONENT_JOB_IDS",
         )
         record.update(
             status="ready" if submit else "preview",
@@ -115,7 +115,7 @@ def main() -> int:
             "merge",
             [str(directory)],
             merge=True,
-            dependency=dependency,
+            dependency=f"afterok:{dependency}",
             overwrite=True,
         )
         record["status"] = "components_submitted"
