@@ -188,6 +188,50 @@ env = {
   PV_PLUGIN_PATH = "$(python -c 'import imas_paraview; print(imas_paraview.__path__[0])')/plugins",
 }
 
+[feature.visualize.tasks.view-results]
+description = "🌈 View rendering results with a shared ParaView state template, or export an image."
+args = [
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Rendering TOML: output wall URI and radiation source URI(s).
+  { arg = "mode", default = "gui", choices = ["gui", "export"] },  # Open an interactive window, or render offscreen.
+  { arg = "output_dir", default = "" },  # Optional new directory for scene.pvsm, scene.png and report.json; export defaults to temporary storage.
+  { arg = "template", default = "configs/paraview/radiation-load.pvsm" },  # Shared layout/format; optionally use a state saved from the GUI.
+]
+cmd = "python scripts/view_results.py"
+env = {
+  RADLOAD_VIEW_CONFIG = "{{ config }}",
+  RADLOAD_VIEW_MODE = "{{ mode }}",
+  RADLOAD_VIEW_OUTPUT = "{{ output_dir }}",
+  RADLOAD_VIEW_TEMPLATE = "{{ template }}",
+  RADLOAD_VIEW_KIND = "results",
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  PYTHONUNBUFFERED = "1",
+}
+
+[feature.visualize.tasks.view-errors]
+description = "📊 Preview all component VTK standard errors as absolute values or percentages."
+args = [
+  { arg = "config", default = "configs/radiation-ids.toml" },  # Rendering TOML; read output.uri/vtk and rendering.json.
+  { arg = "quantity", default = "relative", choices = ["relative", "absolute"] },  # Relative 1σ error [%], or absolute 1σ error [W/m²]; zero load has undefined relative error.
+  { arg = "mode", default = "gui", choices = ["gui", "export"] },  # Open ParaView, or export offscreen.
+  { arg = "output_dir", default = "" },  # Optional new directory for scene.pvsm, scene.png and report.json.
+  { arg = "template", default = "configs/paraview/radiation-errors.pvsm" },  # Shared error-view layout and formatting; editable in ParaView.
+]
+cmd = "python scripts/view_results.py"
+env = {
+  RADLOAD_VIEW_CONFIG = "{{ config }}",
+  RADLOAD_ERROR_QUANTITY = "{{ quantity }}",
+  RADLOAD_VIEW_MODE = "{{ mode }}",
+  RADLOAD_VIEW_OUTPUT = "{{ output_dir }}",
+  RADLOAD_VIEW_TEMPLATE = "{{ template }}",
+  RADLOAD_VIEW_KIND = "errors",
+  HDF5_USE_FILE_LOCKING = "FALSE",
+  OMP_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  PYTHONUNBUFFERED = "1",
+}
+
 [environments]
 default = {
   features = ["default"],
