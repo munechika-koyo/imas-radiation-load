@@ -21,7 +21,6 @@ cherab-imas = { git = "https://github.com/cherab/imas.git", branch = "develop" }
 cherab-stubs = "*"
 xarray = "*"
 jinja2 = ">=3.1,<4"
-imas-core = "*"  # HDF5/UDA backend required by the radiation IDS workflow.
 
 # Task args are the only public argument definitions.
 # Descriptions summarise the task; inline args comments explain argument semantics.
