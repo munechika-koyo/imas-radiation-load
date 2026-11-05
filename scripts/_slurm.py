@@ -26,6 +26,20 @@ def load_template(path: Path) -> Template:
     return environment.get_template(path.name)
 
 
+def job_log_paths(config: Config, directory: Path, name: str) -> tuple[Path, Path]:
+    """Resolve known log substitutions, leaving the job ID for sbatch's response."""
+    job_name = f"radload-{name}"
+    patterns = (
+        config.slurm.stdout or str(directory / "logs" / f"{name}-%j.out"),
+        config.slurm.stderr or str(directory / "logs" / f"{name}-%j.err"),
+    )
+    stdout, stderr = (
+        Path(pattern.replace("%u", getpass.getuser()).replace("%x", job_name))
+        for pattern in patterns
+    )
+    return stdout, stderr
+
+
 def write_job(
     template: Template,
     config: Config,
@@ -44,11 +58,9 @@ def write_job(
     memory = (slurm.merge.memory or slurm.memory) if merge else slurm.memory
     time = (slurm.merge.time or slurm.time) if merge else slurm.time
     job_name = f"radload-{name}"
-    stdout = slurm.stdout or str(directory / "logs" / f"{name}-%j.out")
-    stderr = slurm.stderr or str(directory / "logs" / f"{name}-%j.err")
+    stdout, stderr = job_log_paths(config, directory, name)
     for pattern in (stdout, stderr):
-        # User/job-name substitutions are known before sbatch; %j remains Slurm's job ID.
-        parent = Path(pattern.replace("%u", getpass.getuser()).replace("%x", job_name)).parent
+        parent = pattern.parent
         if "%" in str(parent):
             raise ValueError(
                 "Slurm log parent directories may use %u/%x, but not runtime-only substitutions"
@@ -61,8 +73,8 @@ def write_job(
         "cpus-per-task": cpus,
         "partition": slurm.partition,
         "time": time,
-        "output": stdout,
-        "error": stderr,
+        "output": str(stdout),
+        "error": str(stderr),
         "export": "ALL",
         "chdir": str(slurm.working_directory),
     }

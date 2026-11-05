@@ -158,6 +158,26 @@ env = {
   RADLOAD_OUTPUT_URI = "{{ output_uri }}",
 }
 
+[feature.monitor.dependencies]
+python = ">=3.11"
+rich = "*"
+
+[feature.monitor.tasks.status]
+description = "📡 Show Slurm job states and saved component progress, once or continuously."
+args = [
+  "config",  # Required: rendering TOML used for submission; output.uri identifies the durable submission record.
+  { arg = "mode", default = "once", choices = ["once", "watch"] },  # Print once, or refresh until all submitted jobs finish; Ctrl+C stops watching.
+  { arg = "interval", default = "30" },  # Positive watch refresh interval [s].
+]
+cmd = "python scripts/status.py"
+env = {
+  RADLOAD_CONFIG = "{{ config }}",
+  RADLOAD_STATUS_MODE = "{{ mode }}",
+  RADLOAD_STATUS_INTERVAL = "{{ interval }}",
+  RADLOAD_STATUS_TIMEOUT = "30",  # Per-command Slurm query timeout [s].
+  PYTHONUNBUFFERED = "1",
+}
+
 [feature.lint.dependencies]
 ruff = "*"
 shellcheck = "*"
@@ -237,6 +257,10 @@ default = {
 }
 lint = {
   features = ["lint"],
+  no-default-feature = true,
+}
+monitor = {
+  features = ["monitor"],
   no-default-feature = true,
 }
 visualize = {

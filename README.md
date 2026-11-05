@@ -201,8 +201,38 @@ pixi run submit submit configs/local-radiation.toml results/slurm-run
 Submission creates one component job per target subset and one merge job dependent on all component jobs through `afterok`.
 Each generated script runs a Pixi task; it does not activate a separate Python CLI.
 `jobs.json` records the job IDs, and logs are written under the run directory unless Slurm log paths are configured explicitly.
+Submit mode also stores a durable record beside the output entry, named `<entry-name>.submission.json`.
+It retains the job IDs, submission time, reported cluster, work directory and log paths after temporary workspace cleanup.
+An existing submission record prevents a new submission to the same output URI; choose a new output URI for a new run.
+Preview mode keeps its record in the preview work directory and does not reserve the final output's submission record.
 The explicit run directory in this example is retained after merge.
 If a component job fails, the dependency prevents the automatic merge from running.
+
+### Monitor submitted jobs
+
+Run on the HPC login node with the same configuration used for submission:
+
+```sh
+pixi run status configs/local-radiation.toml
+pixi run status configs/local-radiation.toml watch
+```
+
+The task locates the durable submission record from `output.uri`, queries active jobs with `squeue` and retrieves finished-job accounting with `sacct`.
+It displays each component and the merge stage, job IDs, Slurm states, elapsed times, exit codes, nodes and waiting reasons.
+Rich tables distinguish job states with colors and emoji, and adapt their columns to the terminal width.
+Saved pass counts and convergence come from component checkpoints, or from the final `rendering.json` after merge.
+The saved pass is the last checkpoint, rather than live ray-tracing progress; Slurm `COMPLETED` and calculation convergence are displayed separately.
+
+Watch mode stops after all submitted jobs reach terminal states; Ctrl+C stops the display without affecting jobs.
+In an interactive terminal, watch refreshes the table in place; redirected output keeps readable snapshots without terminal control sequences.
+Its optional interval argument and query timeout are defined in [pixi.toml](pixi.toml).
+Missing accounting records are shown as `UNKNOWN`, never inferred to mean success.
+If Slurm queries fail, the task reports the problem and stops watching rather than claiming that jobs finished.
+The status task is read-only and does not load IDS data.
+
+Durable records are created by submissions made with this version of the workflow.
+Older runs with only a work-directory `jobs.json` are not automatically discovered.
+Retaining log paths does not retain log files inside a temporary workspace; configure persistent Slurm log paths or retain the work directory when those logs are needed after success.
 
 ### Merge retained results
 
@@ -317,6 +347,7 @@ Arguments are supplied to Pixi tasks rather than directly to Python scripts.
 | `validate` | Check the scene and result I/O, with an optional bounded ray probe |
 | `render` | Calculate one named component without Slurm submission and save its final entry |
 | `submit` | Preview scripts or submit all component jobs and their dependent merge |
+| `status` | Show submitted job states and saved calculation progress, once or continuously |
 | `render-component` | Worker subtask invoked by generated component job scripts |
 | `merge` | Assemble a finished run into one wall entry |
 | `view-results` | Open or export the wall load and radiation-emissivity scene |
@@ -341,6 +372,8 @@ For development checks, run `pixi run lint`.
 | Unexpected geometry or duplicated measurements | Inspect `scenegraph.txt`, target subset names and `num_segments`. Replicated target segments provide occlusion only |
 | Preview scripts work locally, but jobs fail on HPC | Check compute-node access to Pixi, the checkout, the run directory and all inputs; add site setup to the Slurm template if needed |
 | Merge does not run after submission | Check job IDs and logs. `afterok` requires successful component jobs, and merge also requires complete, matching results |
+| Status cannot find a submission record | Use the submitted run's output URI. Preview and older runs do not create the durable record |
+| Status shows `UNKNOWN` | Check Slurm access and accounting availability on the submitting cluster; missing records do not establish completion |
 | Results exist but errors remain large | Inspect convergence and pass counts in `rendering.json`; the pass limit permits saving unconverged estimates |
 | Relative-error faces are gray | Estimated power density is zero, so relative error is undefined |
 | Result preview reports a missing emissivity field | Select an array present in your radiation IDS and save an adjusted template, using the IMAS-enabled ParaView session |

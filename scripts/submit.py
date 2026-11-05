@@ -8,7 +8,9 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from _configuration import (
     hdf5_entry_path,
@@ -17,7 +19,8 @@ from _configuration import (
     save_config,
     validate_config,
 )
-from _slurm import load_template, write_job
+from _slurm import job_log_paths, load_template, write_job
+from _submission import claim_submission, submission_path
 from _task_inputs import optional_path, task_inputs
 from _wall_io import wall_geometry
 from _workspace import create_run, write_json
@@ -56,10 +59,52 @@ def main() -> int:
     template = load_template(frozen_template)
     # Generated #SBATCH directives define resources; inherited SBATCH_* defaults must not override them.
     env = {key: value for key, value in os.environ.items() if not key.startswith("SBATCH_")}
-    record: dict = dict(status="generating", components=[], merge=None)
+    record: dict[str, Any] = dict(
+        schema_version=1,
+        status="generating",
+        created_at=datetime.now(UTC).isoformat(),
+        config=str(config.source),
+        output_uri=config.output.uri,
+        output_occurrence=config.output.occurrence,
+        run_directory=str(directory),
+        max_passes=config.render.max_passes,
+        cluster=os.environ.get("SLURM_CLUSTER_NAME") or None,
+        components=[],
+        merge=None,
+    )
+    persistent = submission_path(config.output.uri) if submit else None
+    if persistent is not None:
+        if persistent.is_relative_to(directory):
+            raise ValueError("The submission record must be outside the run directory")
+        claim_submission(persistent, record)
+        print(f"Submission record: {persistent}", flush=True)
     print(f"Work directory: {directory}; final output: {config.output.uri}", flush=True)
 
-    def launch(script: Path) -> str:
+    def save_record() -> None:
+        record["updated_at"] = datetime.now(UTC).isoformat()
+        # The merge may already have removed the temporary run when sbatch returns.
+        # Store job IDs durably first, independently of that directory's lifetime.
+        if persistent is not None:
+            write_json(persistent, record)
+        try:
+            write_json(directory / "jobs.json", record)
+        except FileNotFoundError:
+            if not hdf5_entry_path(config.output.uri).is_dir():
+                raise
+
+    def job_record(name: str, script: Path, component: str | None = None) -> dict[str, Any]:
+        stdout, stderr = job_log_paths(config, directory, name)
+        return dict(
+            component=component,
+            script=str(script),
+            job_id=None,
+            cluster=record["cluster"],
+            stdout=str(stdout),
+            stderr=str(stderr),
+        )
+
+    def launch(job: dict[str, Any]) -> None:
+        script = Path(job["script"])
         command = ["sbatch", "--parsable", str(script)]
         print(shlex.join(command), flush=True)
         response = subprocess.run(
@@ -67,7 +112,13 @@ def main() -> int:
         ).stdout.strip()
         if not re.fullmatch(r"[0-9]+(?:;[^;\s]+)?", response):
             raise RuntimeError(f"Unexpected sbatch response: {response!r}")
-        return response.split(";", 1)[0]
+        job_id, _, cluster = response.partition(";")
+        job.update(job_id=job_id, submitted_at=datetime.now(UTC).isoformat())
+        if cluster:
+            job["cluster"] = cluster
+            record["cluster"] = record["cluster"] or cluster
+        for key in ("stdout", "stderr"):
+            job[key] = job[key].replace("%j", job_id)
 
     try:
         for component in components:
@@ -79,7 +130,7 @@ def main() -> int:
                 "render-component",
                 [component, str(directory), str(config.slurm.cpus_per_task)],
             )
-            record["components"].append(dict(component=component, script=str(script), job_id=None))
+            record["components"].append(job_record(f"render_{component}", script, component))
         merge_script = write_job(
             template,
             config,
@@ -92,9 +143,9 @@ def main() -> int:
         )
         record.update(
             status="ready" if submit else "preview",
-            merge=dict(script=str(merge_script), job_id=None),
+            merge=job_record("merge", merge_script),
         )
-        write_json(directory / "jobs.json", record)
+        save_record()
         print(f"Scripts saved to: {directory / 'jobs'}", flush=True)
         if not submit:
             print(
@@ -104,8 +155,8 @@ def main() -> int:
             return 0
         record["status"] = "submitting"
         for job in record["components"]:
-            job["job_id"] = launch(Path(job["script"]))
-            write_json(directory / "jobs.json", record)
+            launch(job)
+            save_record()
         dependency = ":".join(job["job_id"] for job in record["components"])
         merge_script = write_job(
             template,
@@ -119,22 +170,17 @@ def main() -> int:
             overwrite=True,
         )
         record["status"] = "components_submitted"
-        write_json(directory / "jobs.json", record)
-        record["merge"]["job_id"] = launch(merge_script)
+        save_record()
+        launch(record["merge"])
         record["status"] = "submitted"
-        try:
-            write_json(directory / "jobs.json", record)
-        except FileNotFoundError:
-            if not hdf5_entry_path(config.output.uri).is_dir():
-                raise
+        save_record()
         print(f"Submitted: {len(components)} component jobs + one afterok merge job", flush=True)
         return 0
     except Exception as error:
         record.update(
             status="submission_failed" if submit else "generation_failed", error=str(error)
         )
-        if directory.is_dir():
-            write_json(directory / "jobs.json", record)
+        save_record()
         raise
 
 
