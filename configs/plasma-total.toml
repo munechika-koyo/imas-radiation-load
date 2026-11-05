@@ -1,4 +1,4 @@
-# Example configuration for total plasma emission using PLT and PRB coefficients.
+# Example configuration for total emission from IMAS plasma profiles using PLT and PRB coefficients.
 # Configuration loading is supported; the public rendering workflow is not yet available.
 # Paths are resolved relative to this file.
 
@@ -7,8 +7,8 @@ kind = "plasma_total"
 integration_step = 1e-3  # volume integration step [m]
 
 [plasma]
-core_uri = "imas:hdf5?path=/path/to/iter/3/53301/2"
-edge_uri = "imas:hdf5?path=/path/to/iter/3/53298/2"
+core_uri = "imas:hdf5?path=/path/to/core_profiles"
+edge_uri = "imas:hdf5?path=/path/to/edge_profiles"
 time = 480.0
 time_threshold = inf  # [s]
 # Omit edge_uri to use the core entry; omit time_edge to use time.

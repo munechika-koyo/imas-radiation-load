@@ -1,4 +1,4 @@
-# Example configuration for spectral emission from plasma profiles.
+# Example configuration for spectral emission from IMAS plasma profiles.
 # Configuration loading is supported; the public rendering workflow is not yet available.
 # Paths are resolved relative to this file.
 
@@ -9,8 +9,8 @@ integration_step = 1e-3  # volume integration step [m]
 [plasma]
 # Replace the example paths with IMAS entries readable by the compute nodes.
 # A .nc path is also accepted; relative paths are relative to this file.
-core_uri = "imas:hdf5?path=/path/to/iter/3/53301/2"
-edge_uri = "imas:hdf5?path=/path/to/iter/3/53298/2"
+core_uri = "imas:hdf5?path=/path/to/core_profiles"
+edge_uri = "imas:hdf5?path=/path/to/edge_profiles"
 time = 480.0
 time_threshold = inf  # nearest IDS slice; optionally set a tolerance [s]
 # blend_psi = [0.85, 0.96]

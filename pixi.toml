@@ -1,6 +1,6 @@
 [workspace]
-name = "iter-radiation-load"
-description = "Workspace and scripts for ITER radiation-load calculations"
+name = "imas-radiation-load"
+description = "IMAS-based workflows for component radiation-load calculations"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "osx-64"]
 preview = ["pixi-build"]
@@ -15,7 +15,6 @@ python = [
 ]
 
 [dependencies]
-cherab-iter = { git = "https://github.com/cherab/iter.git", branch = "develop" }
 # 0.8.1 fixes radiation emitter definition.
 cherab-imas = { git = "https://github.com/cherab/imas.git", branch = "develop" }
 cherab-stubs = "*"

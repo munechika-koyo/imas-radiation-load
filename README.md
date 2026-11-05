@@ -1,20 +1,20 @@
-# ITER radiation load
+# IMAS radiation load
 
-A Pixi workspace for calculating incident radiation loads on individual components defined in an IMAS wall IDS.
-The workflow uses radiation IDS emissivity, traces rays with CHERAB and Raysect, and saves per-triangle power densities and Monte Carlo standard errors in a new IMAS wall entry.
-The target geometry can represent divertor components or other wall components.
+An IMAS-based workflow for calculating incident radiation loads on individual wall components.
+IMAS IDSs define the component geometry and radiation inputs, and store the calculated loads and their uncertainties.
+The current workflow reads geometry from a wall IDS and emissivity from a radiation IDS, traces rays with CHERAB and Raysect, and writes per-triangle power densities and Monte Carlo standard errors to a new wall IDS.
 
-![Radiation load on ITER components with plasma emissivity visualized in ParaView](docs/images/radiation-load.png)
+![Component radiation loads and plasma emissivity from IMAS data visualized in ParaView](docs/images/radiation-load.png)
 
-*Example radiation-load distribution on ITER components, shown alongside the plasma emissivity in ParaView.*
+*Example component radiation-load distribution and plasma emissivity, visualized from IMAS data in ParaView.*
 
 ## Getting started
 
 With [Pixi](https://pixi.sh) available, clone the repository:
 
 ```sh
-git clone https://github.com/munechika-koyo/iter-radiation-load.git
-cd iter-radiation-load
+git clone https://github.com/munechika-koyo/imas-radiation-load.git
+cd imas-radiation-load
 ```
 
 Run the commands below from the repository root.
@@ -45,8 +45,8 @@ Each emission source has an independent, annotated example configuration:
 
 | Example configuration | `emitter.kind` | Emission source | Public workflow status |
 | --- | --- | --- | --- |
-| [plasma-spectral.toml](configs/plasma-spectral.toml) | `plasma_spectral` | Spectral emission from plasma profiles | Configuration loading only |
-| [plasma-total.toml](configs/plasma-total.toml) | `plasma_total` | Total plasma emission using PLT and PRB coefficients | Configuration loading only |
+| [plasma-spectral.toml](configs/plasma-spectral.toml) | `plasma_spectral` | Spectral emission from IMAS plasma profiles | Configuration loading only |
+| [plasma-total.toml](configs/plasma-total.toml) | `plasma_total` | Total emission from IMAS plasma profiles using PLT and PRB coefficients | Configuration loading only |
 | [radiation-ids.toml](configs/radiation-ids.toml) | `radiation_ids` | Emission from radiation IDS | Rendering workflow available |
 
 Each example includes its own geometry, rendering, output and Slurm settings.

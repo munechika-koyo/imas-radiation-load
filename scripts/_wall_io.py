@@ -326,7 +326,7 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         f"Wall source: {json.dumps(geometry['source'], sort_keys=True)}. "
         f"Emission source: {json.dumps(source_info, sort_keys=True)}"
     )
-    wall.code.name = "iter-radiation-load"
+    wall.code.name = "imas-radiation-load"
     wall.code.version = "0.1.0"
     _write_wall(wall, config.output.uri, occurrence=config.output.occurrence)
     verify_wall_results(config, geometry, values, time)

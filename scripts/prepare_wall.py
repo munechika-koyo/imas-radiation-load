@@ -127,7 +127,7 @@ def build_wall(
         f"Removed triangles: {sum(part.removed_triangles for part in parts)}."
     )
     wall.time = [0.0]
-    wall.code.name = "iter-radiation-load"
+    wall.code.name = "imas-radiation-load"
     wall.code.version = "0.1.0"
     wall.description_ggd.resize(1)
     description = wall.description_ggd[0]
