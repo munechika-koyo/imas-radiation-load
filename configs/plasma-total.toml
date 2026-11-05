@@ -1,0 +1,62 @@
+# Example configuration for total plasma emission using PLT and PRB coefficients.
+# Configuration loading is supported; the public rendering workflow is not yet available.
+# Paths are resolved relative to this file.
+
+[emitter]
+kind = "plasma_total"
+integration_step = 1e-3  # volume integration step [m]
+
+[plasma]
+core_uri = "imas:hdf5?path=/path/to/iter/3/53301/2"
+edge_uri = "imas:hdf5?path=/path/to/iter/3/53298/2"
+time = 480.0
+time_threshold = inf  # [s]
+# Omit edge_uri to use the core entry; omit time_edge to use time.
+# time_edge = 480.0
+# blend_psi = [0.85, 0.96]
+core_kwargs = {}
+edge_kwargs = {}
+
+[atomic]
+# Elements for TotalRadiatedPower, distinct from spectral line selection.
+total_elements = ["deuterium", "tritium", "helium", "neon", "tungsten"]
+# repository_path = "/shared/openadas/repository"
+
+[geometry.target]
+# Measure each grid_subset in the original segment; copies only occlude rays.
+uri = "imas:hdf5?path=../data/divertor_wall"
+description_index = 0
+occurrence = 0
+time = 0.0
+num_segments = 54  # total including original, spaced by 360 / num_segments about z
+
+# Repeat this table for each additional geometry source; omit if none are needed.
+[[geometry.non_targets]]
+name = "first_wall"
+uri = "imas:hdf5?path=/path/to/first_wall"
+num_segments = 1  # default; use 1 for geometry that already spans the full torus
+# description_index, occurrence and time default to 0, 0 and 0.0.
+
+[render]
+surface_offset = 1e-6  # observer offset along the triangle normal [m]
+# Total power has no physical wavelength bins or bands.
+pixel_samples = 250
+min_samples = 1000
+max_passes = 500
+adaptive_fraction = 0.2
+adaptive_ratio = 25.0
+adaptive_cutoff = 0.1
+save_every = 10
+
+[output]
+uri = "imas:hdf5?path=../results/plasma-total"
+# Omit work_directory to remove temporary intermediate files after a successful merge.
+# work_directory = "../results/plasma-total-work"
+
+[slurm]
+job_template = "../jobs/slurm.sh.j2"
+working_directory = ".."
+cpus_per_task = 56
+partition = "vega"
+time = "infinite"
+

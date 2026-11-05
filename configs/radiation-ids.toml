@@ -1,4 +1,4 @@
-# Configuration template for total-power rendering from radiation IDS.
+# Example configuration for total-power rendering from radiation IDS.
 # Paths are resolved relative to this file.
 
 [emitter]

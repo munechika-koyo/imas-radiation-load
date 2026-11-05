@@ -1,0 +1,79 @@
+# Example configuration for spectral emission from plasma profiles.
+# Configuration loading is supported; the public rendering workflow is not yet available.
+# Paths are resolved relative to this file.
+
+[emitter]
+kind = "plasma_spectral"
+integration_step = 1e-3  # volume integration step [m]
+
+[plasma]
+# Replace the example paths with IMAS entries readable by the compute nodes.
+# A .nc path is also accepted; relative paths are relative to this file.
+core_uri = "imas:hdf5?path=/path/to/iter/3/53301/2"
+edge_uri = "imas:hdf5?path=/path/to/iter/3/53298/2"
+time = 480.0
+time_threshold = inf  # nearest IDS slice; optionally set a tolerance [s]
+# blend_psi = [0.85, 0.96]
+# Omit edge_uri to use the core entry; omit time_edge to use time.
+# Omit blend_psi to use cherab-imas's default mask.
+# time_edge = 480.0
+core_kwargs = {}
+edge_kwargs = {}
+
+[atomic]
+line_elements = [
+  "deuterium",
+  "tritium",
+  "helium",
+  "neon",
+  "tungsten",
+]
+# Omit repository_path to use the default OpenADAS repository.
+# repository_path = "/shared/openadas/repository"
+
+[geometry.target]
+# Measure each grid_subset in the original segment; copies only occlude rays.
+uri = "imas:hdf5?path=../data/divertor_wall"
+description_index = 0
+occurrence = 0
+time = 0.0
+num_segments = 54  # total including original, spaced by 360 / num_segments about z
+
+# Repeat this table for each additional geometry source; omit if none are needed.
+[[geometry.non_targets]]
+name = "first_wall"
+uri = "imas:hdf5?path=/path/to/first_wall"
+num_segments = 1  # default; use 1 for geometry that already spans the full torus
+# description_index, occurrence and time default to 0, 0 and 0.0.
+
+[render]
+surface_offset = 1e-6  # observer offset along the triangle normal [m]
+wavelength_bands = [
+  [0.01, 0.1],
+  [0.1, 1.0],
+  [1.0, 10.0],
+  [10.0, 100.0],
+  [100.0, 1000.0],
+]
+spectral_bins = 100  # linear bins within EACH band
+pixel_samples = 250  # samples per triangle per pass
+min_samples = 1000
+max_passes = 500
+adaptive_fraction = 0.2
+adaptive_ratio = 25.0
+adaptive_cutoff = 0.1
+spectral_percentile = 100.0  # all nonzero spectral bins must meet the cutoff
+save_every = 10  # also save the final pass of each band
+
+[output]
+uri = "imas:hdf5?path=../results/plasma-spectral"
+# Keep spectra and exports; omit work_directory to use temporary storage instead.
+work_directory = "../results/spectral-work"
+
+[slurm]
+job_template = "../jobs/slurm.sh.j2"
+working_directory = ".."
+cpus_per_task = 56
+partition = "vega"
+time = "infinite"
+

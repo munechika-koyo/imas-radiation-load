@@ -41,7 +41,17 @@ The published runtime currently supports `emitter.kind = "radiation_ids"`; plasm
 
 ## Input data and configuration
 
-Start from the annotated [radiation IDS configuration](configs/radiation-ids.toml):
+Each emission source has an independent, annotated example configuration:
+
+| Example configuration | `emitter.kind` | Emission source | Public workflow status |
+| --- | --- | --- | --- |
+| [plasma-spectral.toml](configs/plasma-spectral.toml) | `plasma_spectral` | Spectral emission from plasma profiles | Configuration loading only |
+| [plasma-total.toml](configs/plasma-total.toml) | `plasma_total` | Total plasma emission using PLT and PRB coefficients | Configuration loading only |
+| [radiation-ids.toml](configs/radiation-ids.toml) | `radiation_ids` | Emission from radiation IDS | Rendering workflow available |
+
+Each example includes its own geometry, rendering, output and Slurm settings.
+Copy the example for the intended source to a machine-specific configuration and edit it for the run.
+The commands below use the radiation IDS example, which is supported by the current public workflow:
 
 ```sh
 cp configs/radiation-ids.toml configs/local-radiation.toml
