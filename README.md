@@ -145,9 +145,13 @@ pixi run validate configs/local-radiation.toml
 ```
 
 Validation prints the report directory and the path to `scenegraph.txt` rather than dumping the scenegraph to the terminal.
+When `report_dir` is omitted, each validation creates a unique run directory under the report parent configured in [pixi.toml](pixi.toml), resolved relative to the task's working directory.
+Reports are retained after both successful and failed validation.
+An explicit `report_dir` selects an exact new directory and is never overwritten.
 Inspect this file to confirm reference geometry, `copy_segment_*` nodes, non-target geometry and the representative observer.
 `validation.json` records the completed stages, while `inputs.json` records input identities.
 The I/O check uses synthetic values in a separate sandbox and does not create a production output entry.
+This sandbox is created beside the configured final output to check that filesystem and backend; it is removed after a successful round trip and retained for inspection if the check fails.
 
 The optional `probe_samples` argument controls a bounded ray-tracing check.
 Replace `PROBE_SAMPLES` below with the desired total primary-sample budget:

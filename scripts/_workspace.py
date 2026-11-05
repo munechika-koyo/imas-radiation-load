@@ -1,4 +1,4 @@
-"""Manage intermediate files on the same filesystem as the final IMAS entry."""
+"""Manage calculation workspaces and retained validation reports."""
 
 from __future__ import annotations
 
@@ -23,6 +23,17 @@ def write_json(path: Path, value: object) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def create_validation_report_directory(root: Path, override: Path | None = None) -> Path:
+    """Keep reports in a unique run directory, or claim an explicit new directory."""
+    if override is not None:
+        directory = override.expanduser().resolve()
+        directory.mkdir(parents=True, exist_ok=False)
+        return directory
+    root = root.expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix="run-", dir=root))
 
 
 def create_run(

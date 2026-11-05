@@ -19,7 +19,7 @@ from _probe import SelectedFaces, run_probe
 from _runtime import build_runtime, write_component_inputs
 from _task_inputs import optional_path, task_inputs
 from _wall_io import merge_results
-from _workspace import create_run, write_json
+from _workspace import create_run, create_validation_report_directory, write_json
 
 
 def main() -> int:
@@ -27,11 +27,9 @@ def main() -> int:
     budget = int(values["RADLOAD_PROBE_SAMPLES"])
     if budget < 0:
         raise ValueError("probe_samples must be nonnegative")
-    report_directory = optional_path(values["RADLOAD_REPORT_DIR"])
-    if report_directory is None:
-        report_directory = Path(tempfile.mkdtemp(prefix="iter-radiation-validation-"))
-    else:
-        report_directory.mkdir(parents=True, exist_ok=False)
+    report_directory = create_validation_report_directory(
+        Path(values["RADLOAD_REPORT_ROOT"]), optional_path(values["RADLOAD_REPORT_DIR"])
+    )
     report: dict = dict(status="running", stages=[])
     stage = "configuration"
     print(f"Validation report: {report_directory}", flush=True)
@@ -87,7 +85,7 @@ def main() -> int:
         # Use a sibling of the real entry so this also checks its filesystem/backend.
         parent = hdf5_entry_path(config.output.uri).parent
         parent.mkdir(parents=True, exist_ok=True)
-        sandbox = Path(tempfile.mkdtemp(prefix=".iter-radiation-validation-", dir=parent))
+        sandbox = Path(tempfile.mkdtemp(prefix=".imas-radiation-validation-", dir=parent))
         report["sandbox"] = str(sandbox)
         scratch_config = replace(
             config,

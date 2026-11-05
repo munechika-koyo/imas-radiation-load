@@ -62,7 +62,7 @@ description = "🔍 Validate scene setup and result I/O; save the scenegraph and
 args = [
   { arg = "config", default = "configs/radiation-ids.toml" },  # Workflow TOML used for the full validation.
   { arg = "probe_samples", default = "0" },  # Total sample budget across all components; 0: skip ray tracing.
-  { arg = "report_dir", default = "" },  # New directory for reports and scenegraph.txt; empty: automatic.
+  { arg = "report_dir", default = "" },  # New directory for reports and scenegraph.txt; empty: unique run under RADLOAD_REPORT_ROOT.
 ]
 cmd = "python scripts/validate.py"
 env = {
@@ -70,6 +70,7 @@ env = {
   RADLOAD_CONFIG = "{{ config }}",
   RADLOAD_PROBE_SAMPLES = "{{ probe_samples }}",
   RADLOAD_REPORT_DIR = "{{ report_dir }}",
+  RADLOAD_REPORT_ROOT = "results/validation",  # Parent for automatic report directories, relative to the task's working directory.
   OMP_NUM_THREADS = "1",
   OPENBLAS_NUM_THREADS = "1",
   MKL_NUM_THREADS = "1",
