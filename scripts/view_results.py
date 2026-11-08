@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
 from _configuration import Config, hdf5_entry_path, load_config, require_runtime
@@ -25,28 +24,36 @@ def load_render_config(path: Path) -> Config:
 def main() -> int:
     values = task_inputs()
     config = Path(values["RADLOAD_VIEW_CONFIG"]).expanduser().resolve()
-    load_render_config(config)
+    rendering = load_render_config(config)
     template = Path(values["RADLOAD_VIEW_TEMPLATE"]).expanduser().resolve()
     if not template.is_file():
         raise FileNotFoundError(f"ParaView state template does not exist: {template}")
     mode = values["RADLOAD_VIEW_MODE"]
     if mode not in {"gui", "export"}:
         raise ValueError("Use the gui/export modes defined in the view-results Pixi task")
+    viewpoints = None
+    if mode == "export":
+        viewpoints = Path(values["RADLOAD_VIEW_VIEWPOINTS"]).expanduser().resolve()
+        if not viewpoints.is_file():
+            raise FileNotFoundError(f"Camera preset file does not exist: {viewpoints}")
     program = "paraview" if mode == "gui" else "pvpython"
     executable = shutil.which(program)
     if executable is None:
         raise FileNotFoundError(f"{program} is missing; use the visualize Pixi environment")
     executable = str(Path(executable).resolve())
     output = optional_path(values["RADLOAD_VIEW_OUTPUT"])
+    if output is None and mode == "export":
+        parent = hdf5_entry_path(rendering.output.uri) / values["RADLOAD_VIEW_EXPORT_SUBDIR"]
+        output = parent / f"view-{values['RADLOAD_VIEW_KIND']}"
     if output is not None:
-        output.mkdir(parents=True, exist_ok=False)
-    elif mode == "export":
-        output = Path(tempfile.mkdtemp(prefix="iter-radiation-view-"))
+        output.mkdir(parents=True, exist_ok=True)
     scripts = Path(__file__).resolve().parent
     env = dict(os.environ)
     env["RADLOAD_VIEW_CONFIG"] = str(config)
     env["RADLOAD_VIEW_TEMPLATE"] = str(template)
     env["RADLOAD_VIEW_OUTPUT"] = str(output) if output else ""
+    if viewpoints is not None:
+        env["RADLOAD_VIEW_VIEWPOINTS"] = str(viewpoints)
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(scripts), env.get("PYTHONPATH"))))
     args = [executable]
     args += ["--script"] if mode == "gui" else ["--force-offscreen-rendering"]
@@ -58,6 +65,8 @@ def main() -> int:
     args += [str(scripts / scene)]
     print(f"Rendering configuration: {config}", flush=True)
     print(f"ParaView state template: {template}", flush=True)
+    if viewpoints is not None:
+        print(f"Camera presets: {viewpoints}", flush=True)
     if output:
         print(f"Visualization output: {output}", flush=True)
     os.execve(executable, args, env)

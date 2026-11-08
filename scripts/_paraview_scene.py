@@ -82,7 +82,14 @@ def load_state_tree(tree: ET.ElementTree, bindings: dict[int, Any] | None = None
     state = tree.getroot().find("ServerManagerState")
     if state is None:
         raise ValueError("Not a ParaView state")
-    with tempfile.TemporaryDirectory(prefix="radiation-view-state-") as directory:
+    if os.environ["RADLOAD_VIEW_MODE"] == "export":
+        # Export full geometry. VTK's quadric LOD filter can also crash when
+        # reducing these composite grids, even with a high view LOD threshold.
+        for element in state.findall("./Proxy/Property[@name='SuppressLOD']/Element"):
+            element.set("value", "1")
+    with tempfile.TemporaryDirectory(
+        prefix=".radiation-view-state-", dir=os.environ.get("RADLOAD_VIEW_OUTPUT") or None
+    ) as directory:
         path = Path(directory) / "scene.pvsm"
         tree.write(path, encoding="utf-8", xml_declaration=True)
         if os.environ["RADLOAD_VIEW_MODE"] == "gui":
@@ -258,9 +265,23 @@ def build() -> dict[str, Any]:
     )
     if destination := os.environ.get("RADLOAD_VIEW_OUTPUT"):
         directory = Path(destination)
-        pv.SaveState(str(directory / "scene.pvsm"))
-        options = dict(ImageResolution=export_size) if mode == "export" else {}
-        pv.SaveScreenshot(str(directory / "scene.png"), view, **options)
+        if mode == "export":
+            from _paraview_export import export_viewpoints
+
+            report["exports"] = export_viewpoints(
+                view,
+                components,
+                wall_display,
+                directory,
+                Path(os.environ["RADLOAD_VIEW_VIEWPOINTS"]),
+                export_size,
+                template=template,
+            )
+            report["viewpoints"] = os.environ["RADLOAD_VIEW_VIEWPOINTS"]
+        else:
+            pv.SaveState(str(directory / "scene.pvsm"))
+            pv.SaveScreenshot(str(directory / "scene.png"), view)
+        report["elapsed_seconds"] = time.monotonic() - start
         (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if mode == "gui":
             pv.Render(view)

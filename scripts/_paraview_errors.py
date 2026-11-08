@@ -16,6 +16,7 @@ from paraview import simple as pv
 from vtkmodules.util.numpy_support import vtk_to_numpy
 
 from _configuration import hdf5_entry_path
+from _paraview_export import export_viewpoints
 from _paraview_scene import load_state_tree
 from view_results import CONFIGS_DIRECTORY, load_render_config
 
@@ -189,9 +190,25 @@ def build() -> dict[str, Any]:
     )
     if destination := os.environ.get("RADLOAD_VIEW_OUTPUT"):
         path = Path(destination)
-        pv.SaveState(str(path / "scene.pvsm"))
-        options = dict(ImageResolution=export_size) if mode == "export" else {}
-        pv.SaveScreenshot(str(path / "scene.png"), view, **options)
+        if mode == "export":
+            report["exports"] = export_viewpoints(
+                view,
+                selected,
+                pv.GetDisplayProperties(selected, view),
+                path,
+                Path(os.environ["RADLOAD_VIEW_VIEWPOINTS"]),
+                export_size,
+                template=Path(os.environ["RADLOAD_VIEW_TEMPLATE"]),
+                source_name=f"{quantity.capitalize()} error",
+                filename_prefix=f"radiation-error-{quantity}",
+                allow_nan=quantity == "relative",
+                include_log=False,
+            )
+            report["viewpoints"] = os.environ["RADLOAD_VIEW_VIEWPOINTS"]
+        else:
+            pv.SaveState(str(path / "scene.pvsm"))
+            pv.SaveScreenshot(str(path / "scene.png"), view)
+        report["elapsed_seconds"] = time.monotonic() - start
         (path / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if mode == "gui":
             pv.Render(view)

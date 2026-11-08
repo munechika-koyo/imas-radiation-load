@@ -200,6 +200,9 @@ imas-python = "*"
 [feature.visualize.pypi-dependencies]
 imas-paraview = { version = "==2.4.0", extras = ["standalone"] }
 
+[feature.visualize.activation.env]
+RADLOAD_VIEW_EXPORT_SUBDIR = "visualization"  # Relative to the output IMAS entry; result/error exports reuse their respective directories.
+
 [feature.visualize.tasks.paraview]
 description = "🖥️ Launch ParaView with IMAS plugins enabled."
 cmd = "paraview"
@@ -208,12 +211,13 @@ env = {
 }
 
 [feature.visualize.tasks.view-results]
-description = "🌈 View rendering results with a shared ParaView state template, or export an image."
+description = "🌈 View rendering results, or export saved viewpoints with linear/log radiation-load colors."
 args = [
   { arg = "config", default = "configs/radiation-ids.toml" },  # Rendering TOML: output wall URI and radiation source URI(s).
   { arg = "mode", default = "gui", choices = ["gui", "export"] },  # Open an interactive window, or render offscreen.
-  { arg = "output_dir", default = "" },  # Optional new directory for scene.pvsm, scene.png and report.json; export defaults to temporary storage.
+  { arg = "output_dir", default = "" },  # Optional export directory; empty: reuse view-results under output.uri's visualization subdirectory. Existing exports are overwritten.
   { arg = "template", default = "configs/paraview/radiation-load.pvsm" },  # Shared layout/format; optionally use a state saved from the GUI.
+  { arg = "viewpoints", default = "configs/paraview/radiation-load.pvcvbc" },  # Saved camera configurations used in export mode, including projection type.
 ]
 cmd = "python scripts/view_results.py"
 env = {
@@ -221,6 +225,7 @@ env = {
   RADLOAD_VIEW_MODE = "{{ mode }}",
   RADLOAD_VIEW_OUTPUT = "{{ output_dir }}",
   RADLOAD_VIEW_TEMPLATE = "{{ template }}",
+  RADLOAD_VIEW_VIEWPOINTS = "{{ viewpoints }}",
   RADLOAD_VIEW_KIND = "results",
   HDF5_USE_FILE_LOCKING = "FALSE",
   OMP_NUM_THREADS = "1",
@@ -229,13 +234,14 @@ env = {
 }
 
 [feature.visualize.tasks.view-errors]
-description = "📊 Preview all component VTK standard errors as absolute values or percentages."
+description = "📊 View component standard errors, or export saved viewpoints with linear error colors."
 args = [
   { arg = "config", default = "configs/radiation-ids.toml" },  # Rendering TOML; read output.uri/vtk and rendering.json.
   { arg = "quantity", default = "relative", choices = ["relative", "absolute"] },  # Relative 1σ error [%], or absolute 1σ error [W/m²]; zero load has undefined relative error.
   { arg = "mode", default = "gui", choices = ["gui", "export"] },  # Open ParaView, or export offscreen.
-  { arg = "output_dir", default = "" },  # Optional new directory for scene.pvsm, scene.png and report.json.
+  { arg = "output_dir", default = "" },  # Optional export directory; empty: reuse view-errors under output.uri's visualization subdirectory. Existing exports are overwritten.
   { arg = "template", default = "configs/paraview/radiation-errors.pvsm" },  # Shared error-view layout and formatting; editable in ParaView.
+  { arg = "viewpoints", default = "configs/paraview/radiation-load.pvcvbc" },  # Shared saved camera configurations, including projection type.
 ]
 cmd = "python scripts/view_results.py"
 env = {
@@ -244,6 +250,7 @@ env = {
   RADLOAD_VIEW_MODE = "{{ mode }}",
   RADLOAD_VIEW_OUTPUT = "{{ output_dir }}",
   RADLOAD_VIEW_TEMPLATE = "{{ template }}",
+  RADLOAD_VIEW_VIEWPOINTS = "{{ viewpoints }}",
   RADLOAD_VIEW_KIND = "errors",
   HDF5_USE_FILE_LOCKING = "FALSE",
   OMP_NUM_THREADS = "1",

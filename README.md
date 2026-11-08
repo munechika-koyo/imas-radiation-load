@@ -307,16 +307,40 @@ The GGD reader does not apply arbitrary radiation `DBEntry` kwargs.
 
 ### Export images
 
-Use a new output directory for each export:
+Export to the rendering output entry without specifying a separate destination:
 
 ```sh
-pixi run view-results configs/local-radiation.toml export results/result-preview
-pixi run view-errors configs/local-radiation.toml relative export results/error-preview
+pixi run view-results configs/local-radiation.toml export
+pixi run view-errors configs/local-radiation.toml relative export
 ```
 
-Each export directory contains `scene.png`, `scene.pvsm` and `report.json`.
-If the directory argument is omitted in export mode, the task allocates a temporary directory and prints its location.
-GUI mode can also save these files when an output directory is supplied.
+Exports reuse a fixed directory beneath the output IMAS entry's visualization subdirectory and print its location.
+The subdirectory name is configured in [pixi.toml](pixi.toml).
+Result and error previews use separate `view-results` and `view-errors` directories.
+Each invocation overwrites the matching images, PVSM states and report in that directory.
+An explicit `output_dir` selects a directory elsewhere and also allows existing exports to be overwritten.
+
+`view-results` exports each camera in [radiation-load.pvcvbc](configs/paraview/radiation-load.pvcvbc) with both linear and logarithmic radiation-load colors.
+The side view uses orthographic projection; the other saved views retain perspective projection.
+Images and matching PVSM states are named `radiation-load-<viewpoint>-<scale>.png` and `.pvsm`, with a shared `report.json` recording camera settings, color ranges and image dimensions.
+The emissivity color scale remains as defined in the state template.
+Log exports preserve a positive lower color limit saved in the PVSM, while retaining the upper limit selected by the state's rescaling policy.
+If the saved lower limit is nonpositive, the smallest positive data value is used instead; save a positive lower color limit in the state to keep negligible values from stretching the logarithmic range.
+Values below the logarithmic lower limit, including zero load, use the color map's below-range color.
+An entirely nonpositive field cannot be exported logarithmically and produces a clear error.
+
+Image dimensions and scalar-bar typography are defined together in the shared PVSM, and screenshots use that resolution with proportional font scaling.
+Log exports use ParaView's automatic logarithmic axis with decade labels and intermediate minor ticks; linear exports preserve the template's label settings.
+Exported result PNGs have a transparent background; geometry, color bars and labels retain the template's colors and opacity.
+Adjust those properties in ParaView and save a custom state to change the export formatting.
+The optional final `viewpoints` argument selects a different native custom-viewpoint file.
+
+`view-errors` exports the same saved cameras with linear colors for the chosen error quantity, including orthographic projection for the side view and transparent PNG backgrounds.
+Images and matching states are named `radiation-error-<quantity>-<viewpoint>-linear.png` and `.pvsm`; `report.json` records the latest export, including camera, scalar-bar and color-range settings.
+Error color ranges and typography come from [radiation-errors.pvsm](configs/paraview/radiation-errors.pvsm), which hides the orientation axes by default.
+Undefined relative errors at zero load retain the template's NaN color.
+Both preview tasks accept the optional final `viewpoints` argument to select another native camera-preset file.
+GUI mode saves `scene.png`, `scene.pvsm` and `report.json` when an explicit output directory is supplied.
 
 ### Layouts, colors and saved views
 

@@ -8263,7 +8263,7 @@
         <Element index="0" value="" />
       </Property>
       <Property name="LabelFontSize" id="1223.LabelFontSize" number_of_elements="1">
-        <Element index="0" value="14" />
+        <Element index="0" value="28" />
         <Domain name="range" id="1223.LabelFontSize.range" />
       </Property>
       <Property name="LabelFormat" id="1223.LabelFormat" number_of_elements="1">
@@ -8334,7 +8334,7 @@
         <Element index="0" value="1" />
       </Property>
       <Property name="ScalarBarThickness" id="1223.ScalarBarThickness" number_of_elements="1">
-        <Element index="0" value="18" />
+        <Element index="0" value="28" />
       </Property>
       <Property name="Selectable" id="1223.Selectable" number_of_elements="1">
         <Element index="0" value="0" />
@@ -8373,7 +8373,7 @@
         <Element index="0" value="" />
       </Property>
       <Property name="TitleFontSize" id="1223.TitleFontSize" number_of_elements="1">
-        <Element index="0" value="16" />
+        <Element index="0" value="32" />
         <Domain name="range" id="1223.TitleFontSize.range" />
       </Property>
       <Property name="TitleItalic" id="1223.TitleItalic" number_of_elements="1">
@@ -8544,7 +8544,7 @@
         <Element index="0" value="" />
       </Property>
       <Property name="LabelFontSize" id="1486.LabelFontSize" number_of_elements="1">
-        <Element index="0" value="14" />
+        <Element index="0" value="28" />
         <Domain name="range" id="1486.LabelFontSize.range" />
       </Property>
       <Property name="LabelFormat" id="1486.LabelFormat" number_of_elements="1">
@@ -8615,7 +8615,7 @@
         <Element index="0" value="1" />
       </Property>
       <Property name="ScalarBarThickness" id="1486.ScalarBarThickness" number_of_elements="1">
-        <Element index="0" value="18" />
+        <Element index="0" value="28" />
       </Property>
       <Property name="Selectable" id="1486.Selectable" number_of_elements="1">
         <Element index="0" value="0" />
@@ -8654,7 +8654,7 @@
         <Element index="0" value="" />
       </Property>
       <Property name="TitleFontSize" id="1486.TitleFontSize" number_of_elements="1">
-        <Element index="0" value="16" />
+        <Element index="0" value="32" />
         <Domain name="range" id="1486.TitleFontSize.range" />
       </Property>
       <Property name="TitleItalic" id="1486.TitleItalic" number_of_elements="1">
@@ -9417,7 +9417,7 @@
         <Element index="2" value="0" />
       </Property>
       <Property name="OrientationAxesVisibility" id="922.OrientationAxesVisibility" number_of_elements="1">
-        <Element index="0" value="1" />
+        <Element index="0" value="0" />
         <Domain name="bool" id="922.OrientationAxesVisibility.bool" />
       </Property>
       <Property name="OrientationAxesXColor" id="922.OrientationAxesXColor" number_of_elements="3">
