@@ -3,14 +3,100 @@
 from __future__ import annotations
 
 import getpass
+import json
+import math
 import os
 import shlex
+import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
 
 from _configuration import Config
+
+
+def collect_slurm_timings(
+    directory: Path, components: list[str], *, timeout: float | None
+) -> dict[str, dict[str, Any]]:
+    """Fetch finished allocation times once per cluster; missing accounting is optional."""
+    if timeout is None or not (directory / "jobs.json").is_file():
+        return {}
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("Slurm accounting timeout must be finite and positive")
+    executable = shutil.which("sacct")
+    if executable is None:
+        print(
+            "Slurm timing unavailable: sacct is not installed; keeping worker timings.", flush=True
+        )
+        return {}
+    try:
+        record = json.loads((directory / "jobs.json").read_text())
+        since = (
+            datetime.fromisoformat(record["created_at"])
+            .astimezone(UTC)
+            .strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        groups: dict[str | None, dict[str, str]] = {}
+        for job in record["components"]:
+            if job["component"] in components and job["job_id"] is not None:
+                cluster = job.get("cluster") or record.get("cluster")
+                groups.setdefault(cluster, {})[str(job["job_id"])] = job["component"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Slurm timing unavailable: cannot read submission record: {error}", flush=True)
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    env = dict(os.environ, TZ="UTC", SLURM_TIME_FORMAT="standard")
+    for cluster, jobs in groups.items():
+        command = [
+            executable,
+            *(["--clusters", cluster] if cluster else ["--local"]),
+            "--allocations",
+            "--noheader",
+            "--parsable2",
+            "--jobs",
+            ",".join(jobs),
+            "--starttime",
+            since,
+            "--format=JobIDRaw,State%80,Start,End,ElapsedRaw",
+        ]
+        try:
+            response = subprocess.run(
+                command, env=env, capture_output=True, text=True, check=True, timeout=timeout
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"Slurm timing unavailable: {error}; keeping worker timings.", flush=True)
+            continue
+        for line in response.stdout.splitlines():
+            fields = [value.strip() for value in line.split("|")]
+            if len(fields) != 5:
+                continue
+            job_id, state, started, finished, elapsed = fields
+            if job_id not in jobs or not elapsed.isdecimal():
+                continue
+            try:
+                started_at = datetime.fromisoformat(started).replace(tzinfo=UTC)
+                finished_at = datetime.fromisoformat(finished).replace(tzinfo=UTC)
+            except ValueError:
+                # Accounting may not have received the job's final update yet.
+                continue
+            result[jobs[job_id]] = dict(
+                job_id=job_id,
+                cluster=cluster,
+                state=state,
+                started_at=started_at.isoformat(),
+                finished_at=finished_at.isoformat(),
+                elapsed_seconds=int(elapsed),
+            )
+    missing = sorted(set(components) - result.keys())
+    if missing:
+        print(
+            f"Slurm timing unavailable for: {', '.join(missing)}; keeping worker timings.",
+            flush=True,
+        )
+    return result
 
 
 def load_template(path: Path) -> Template:

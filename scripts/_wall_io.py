@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ from _configuration import (
     load_config,
     require_runtime,
 )
+from _slurm import collect_slurm_timings
 from _workspace import load_run, write_json
 
 
@@ -208,6 +210,12 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
         components={},
     )
     source_info: dict | None = None
+    accounting_timeout = os.environ.get("RADLOAD_SLURM_ACCOUNTING_TIMEOUT")
+    slurm_timings = collect_slurm_timings(
+        run_directory,
+        targets,
+        timeout=float(accounting_timeout) if accounting_timeout is not None else None,
+    )
     for name in targets:
         directory = run_directory / name
         identity = json.loads((directory / "identity.json").read_text())
@@ -278,6 +286,8 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
             render_pass=render_pass,
             samples_min=int(samples.min()),
             samples_max=int(samples.max()),
+            timing=status.get("timing"),
+            slurm=slurm_timings.get(name),
         )
     assert source_info is not None
     time = float(source_info["time"])

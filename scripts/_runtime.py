@@ -8,6 +8,7 @@ from raysect.primitive import Mesh
 from _configuration import Config, require_runtime, save_config
 from _scene import create_scene
 from _source import load_source
+from _timing import RenderTiming
 from _wall_io import wall_geometry
 from _workspace import load_run, write_json
 
@@ -45,6 +46,7 @@ def write_component_inputs(
 
 def render_component(config: Config, component: str, directory: Path, workers: int) -> bool:
     """Calculate one planned component and return convergence; the pass limit is a valid stop."""
+    timing = RenderTiming(workers)
     if workers < 1:
         raise ValueError("workers must be positive")
     manifest = load_run(directory)
@@ -59,4 +61,4 @@ def render_component(config: Config, component: str, directory: Path, workers: i
     print(f"Component: {component}; work directory: {directory}; workers: {workers}", flush=True)
     from _power_render import render_mesh
 
-    return render_mesh(world, meshes[component], destination, workers, config)
+    return render_mesh(world, meshes[component], destination, workers, config, timing=timing)

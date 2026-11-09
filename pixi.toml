@@ -145,7 +145,7 @@ env = {
 }
 
 [tasks.merge]
-description = "🔗 Save finished estimates, VTK errors and convergence records; clean temporary files."
+description = "🔗 Save finished estimates, VTK errors, convergence and timing records; clean temporary files."
 args = [
   "run_dir",  # Required: run directory containing the planned components and their results.
   { arg = "config", default = "" },  # Workflow TOML; empty: use run_dir/config.toml.
@@ -154,6 +154,7 @@ args = [
 cmd = "python scripts/merge.py"
 env = {
   HDF5_USE_FILE_LOCKING = "FALSE",
+  RADLOAD_SLURM_ACCOUNTING_TIMEOUT = "30",  # Per-cluster sacct timeout [s]; unavailable accounting does not block result storage.
   RADLOAD_RUN_DIR = "{{ run_dir }}",
   RADLOAD_CONFIG = "{{ config }}",
   RADLOAD_OUTPUT_URI = "{{ output_uri }}",

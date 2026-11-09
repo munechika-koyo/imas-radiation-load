@@ -275,6 +275,27 @@ Reaching the pass limit still saves the current estimates and errors and allows 
 **A successful job or merge does not imply convergence.**
 
 Inspect `rendering.json` for each component's `converged` flag, stopping reason, pass count and minimum/maximum sample counts.
+Each component also retains a `timing` record, copied from its intermediate `status.json`, and a separate `slurm` accounting record when available.
+
+| Field under `components.<name>` | Meaning |
+| --- | --- |
+| `timing.rendering_seconds` | Cumulative wall-clock time inside observer calls, including ray tracing and pipeline accumulation |
+| `timing.setup_seconds` | Input loading, scene/camera construction and component input snapshots |
+| `timing.save_seconds` | Cumulative checkpoint NPZ/VTK serialization time |
+| `timing.total_seconds` | Component worker elapsed time, including setup, rendering, saving and bookkeeping |
+| `timing.started_at`, `timing.updated_at`, `timing.finished_at` | UTC timestamps; `finished_at` is unset while the component is running |
+| `timing.workers`, `timing.slurm_job_id` | Render process count and Slurm job ID, when running under Slurm |
+| `slurm.elapsed_seconds` | Slurm allocation elapsed time, obtained from `sacct` during merge |
+| `slurm.started_at`, `slurm.finished_at` | Slurm allocation start/end timestamps in UTC |
+
+Worker timings are updated at saved checkpoints and finalized on successful component completion.
+They measure elapsed time, not accumulated CPU time across worker processes.
+The worker measurement begins at component execution and excludes Python/Pixi startup, queue waiting and the separate merge job.
+Slurm accounting includes job startup and shutdown; the merge task's query timeout is defined in [pixi.toml](pixi.toml).
+Unavailable or delayed accounting leaves `slurm` as `null` without blocking result storage.
+Older results and synthetic validation results without measurements retain `timing: null`; elapsed times are not inferred from file timestamps.
+Because component jobs run in parallel, summing their elapsed times does not give the workflow's end-to-end duration.
+
 The uncertainty is a **1-sigma Monte Carlo standard error of the mean**, not an estimate of geometry or emission-model uncertainty.
 Relative error is `100 * PowerDensityError / abs(PowerDensity)` in percent.
 When the estimated load is zero, relative error is undefined; the error preview shows those faces in gray.

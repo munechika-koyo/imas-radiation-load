@@ -1,6 +1,10 @@
 """Total-power observers and intermediate results, shared with validation."""
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 from raysect.core.workflow import MulticoreEngine, SerialEngine
@@ -9,6 +13,7 @@ from raysect.optical.observer import MeshCamera, MonoAdaptiveSampler1D, PowerPip
 from raysect.primitive import Mesh, export_vtk
 
 from _configuration import Config
+from _timing import RenderTiming
 from _workspace import write_json
 
 
@@ -56,8 +61,10 @@ def save_results(
     complete: bool,
     converged: bool,
     render_pass: int,
+    timing: RenderTiming | None = None,
 ) -> None:
     """Write the same per-face intermediate schema for real and validation data."""
+    save_started = perf_counter()
     if (
         not np.isfinite(density).all()
         or not np.isfinite(error).all()
@@ -78,25 +85,38 @@ def save_results(
         str(directory / "power_density.vtk"),
         triangle_data={"PowerDensity": density, "PowerDensityError": error},
     )
-    write_json(
-        directory / "status.json",
-        dict(
-            complete=complete,
-            converged=converged,
-            render_pass=render_pass,
-            stop_reason="converged" if converged else "max_passes" if complete else "in_progress",
-        ),
+    status: dict[str, object] = dict(
+        complete=complete,
+        converged=converged,
+        render_pass=render_pass,
+        stop_reason="converged" if converged else "max_passes" if complete else "in_progress",
     )
+    if timing is not None:
+        timing.save_seconds += perf_counter() - save_started
+        status["timing"] = timing.snapshot()
+    write_json(directory / "status.json", status)
 
 
-def render_mesh(world: World, mesh: Mesh, directory: Path, workers: int, config: Config) -> bool:
+def render_mesh(
+    world: World,
+    mesh: Mesh,
+    directory: Path,
+    workers: int,
+    config: Config,
+    *,
+    timing: RenderTiming | None = None,
+) -> bool:
     """Stop on convergence or at max_passes; return whether the sampler converged."""
+    timing = timing if timing is not None else RenderTiming(workers)
     camera, pipeline = create_camera(world, mesh, workers, config)
     converged = False
     try:
         areas = np.asarray(camera.collection_areas)
+        timing.finish_setup()
         for render_pass in range(1, config.render.max_passes + 1):
+            pass_started = perf_counter()
             camera.observe()
+            timing.rendering_seconds += perf_counter() - pass_started
             converged = not camera.frame_sampler.generate_tasks(len(areas))
             finished = converged or render_pass == config.render.max_passes
             print(f"{mesh.name}: pass {render_pass}; converged={converged}", flush=True)
@@ -110,9 +130,13 @@ def render_mesh(world: World, mesh: Mesh, directory: Path, workers: int, config:
                     complete=finished,
                     converged=converged,
                     render_pass=render_pass,
+                    timing=timing,
                 )
             if converged:
                 break
     finally:
         camera.parent = None
+    status = json.loads((directory / "status.json").read_text())
+    status["timing"] = timing.snapshot(finished=True)
+    write_json(directory / "status.json", status)
     return converged
