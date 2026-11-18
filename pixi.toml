@@ -200,7 +200,6 @@ lint = {
 [feature.visualize.dependencies]
 paraview = "*"
 vtk-base = ">=9.1"
-imas-python = "*"
 
 [feature.visualize.pypi-dependencies]
 imas-paraview = { version = "==2.4.0", extras = ["standalone"] }
@@ -248,7 +247,7 @@ default = {
 }
 lint = {
   features = ["lint"],
-  no-default-feature = true,
+  solve-group = "main",
 }
 monitor = {
   features = ["monitor"],
@@ -256,6 +255,5 @@ monitor = {
 }
 visualize = {
   features = ["visualize"],
-  no-default-feature = true,
-  # solve-group = "main"
+  solve-group = "main"
 }
