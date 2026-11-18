@@ -10,6 +10,7 @@ from _configuration import Config, hdf5_entry_path, load_config, require_runtime
 from _task_inputs import optional_path, task_inputs
 
 CONFIGS_DIRECTORY = Path(__file__).resolve().parent.parent / "configs"
+TEMP_DIRECTORY = CONFIGS_DIRECTORY.parent / ".cache" / "tmp"
 
 
 def load_render_config(path: Path) -> Config:
@@ -44,11 +45,13 @@ def main() -> int:
     output = optional_path(values["RADLOAD_VIEW_OUTPUT"])
     if output is None and mode == "export":
         parent = hdf5_entry_path(rendering.output.uri) / values["RADLOAD_VIEW_EXPORT_SUBDIR"]
-        output = parent / f"view-{values['RADLOAD_VIEW_KIND']}"
+        output = parent / "view-results"
     if output is not None:
         output.mkdir(parents=True, exist_ok=True)
     scripts = Path(__file__).resolve().parent
     env = dict(os.environ)
+    TEMP_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = str(TEMP_DIRECTORY)
     env["RADLOAD_VIEW_CONFIG"] = str(config)
     env["RADLOAD_VIEW_TEMPLATE"] = str(template)
     env["RADLOAD_VIEW_OUTPUT"] = str(output) if output else ""
@@ -57,12 +60,7 @@ def main() -> int:
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(scripts), env.get("PYTHONPATH"))))
     args = [executable]
     args += ["--script"] if mode == "gui" else ["--force-offscreen-rendering"]
-    scene = (
-        "_paraview_errors.py"
-        if values.get("RADLOAD_VIEW_KIND") == "errors"
-        else "_paraview_scene.py"
-    )
-    args += [str(scripts / scene)]
+    args += [str(scripts / "_paraview_scene.py")]
     print(f"Rendering configuration: {config}", flush=True)
     print(f"ParaView state template: {template}", flush=True)
     if viewpoints is not None:

@@ -241,8 +241,6 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
             raise ValueError(
                 f"{name}: results must be converged, pass-limited, or explicitly stopped by the user"
             )
-        if not (directory / "power_density.vtk").is_file():
-            raise FileNotFoundError(f"{name}: the VTK result with standard errors is missing")
         recorded = load_config(directory / "config.toml")
         if (
             recorded.plasma != config.plasma
@@ -341,10 +339,6 @@ def merge_results(config: Config, run_directory: Path, *, validation: bool = Fal
     _write_wall(wall, config.output.uri, occurrence=config.output.occurrence)
     verify_wall_results(config, geometry, values, time)
     output = hdf5_entry_path(config.output.uri)
-    vtk_directory = output / "vtk"
-    vtk_directory.mkdir()
-    for name in targets:
-        shutil.copyfile(run_directory / name / "power_density.vtk", vtk_directory / f"{name}.vtk")
     write_json(output / "rendering.json", sampling)
     return config.output.uri
 

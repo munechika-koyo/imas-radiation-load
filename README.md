@@ -37,7 +37,7 @@ The published runtime currently supports `emitter.kind = "radiation_ids"`; plasm
 3. Run `check-config` and `validate`, then inspect the saved scenegraph.
 4. Run one component directly with `render`, or submit all components as separate Slurm jobs with `submit`.
 5. Assemble the component results into one wall IDS. Slurm submission schedules this merge automatically with an `afterok` dependency.
-6. Open the result and error previews with `view-results` and `view-errors`.
+6. Open the power-density and error pipelines with `view-results`.
 
 ## Input data and configuration
 
@@ -258,16 +258,14 @@ A completed output entry contains:
 output-entry/
 ├── master.h5
 ├── wall.h5
-├── rendering.json
-└── vtk/
-    ├── component_a.vtk
-    └── component_b.vtk
+└── rendering.json
 ```
 
 The wall IDS preserves the reference geometry and associates each measured component's per-triangle power density with its `grid_subset`.
-Results are stored under `description_ggd → ggd → power_density`, with symmetric standard errors in `values_error_upper` and `values_error_lower`.
+Results are stored together in one wall IDS under `description_ggd[0].ggd[0].power_density[]`: `values` contains the power density, and `values_error_upper` and `values_error_lower` contain symmetric standard errors.
 Both power density and its error use W/m².
-Each component VTK contains cell arrays named `PowerDensity` and `PowerDensityError`.
+The errors are positive absolute deviations, so the 1σ interval is `[values - values_error_lower, values + values_error_upper]`, following the [IMAS error-bar convention](https://imas-data-dictionary.readthedocs.io/en/latest/errorbars.html).
+Workers retain both arrays and sample counts in intermediate `power_density.npz` checkpoints until merge cleanup.
 
 Rendering stops when the adaptive sampler converges or `render.max_passes` is reached.
 Set the pass limit and convergence threshold in the workflow TOML.
@@ -281,7 +279,7 @@ Each component also retains a `timing` record, copied from its intermediate `sta
 | --- | --- |
 | `timing.rendering_seconds` | Cumulative wall-clock time inside observer calls, including ray tracing and pipeline accumulation |
 | `timing.setup_seconds` | Input loading, scene/camera construction and component input snapshots |
-| `timing.save_seconds` | Cumulative checkpoint NPZ/VTK serialization time |
+| `timing.save_seconds` | Cumulative checkpoint NPZ serialization time |
 | `timing.total_seconds` | Component worker elapsed time, including setup, rendering, saving and bookkeeping |
 | `timing.started_at`, `timing.updated_at`, `timing.finished_at` | UTC timestamps; `finished_at` is unset while the component is running |
 | `timing.workers`, `timing.slurm_job_id` | Render process count and Slurm job ID, when running under Slurm |
@@ -297,7 +295,7 @@ Older results and synthetic validation results without measurements retain `timi
 Because component jobs run in parallel, summing their elapsed times does not give the workflow's end-to-end duration.
 
 The uncertainty is a **1-sigma Monte Carlo standard error of the mean**, not an estimate of geometry or emission-model uncertainty.
-Relative error is `100 * PowerDensityError / abs(PowerDensity)` in percent.
+Relative error is `100 * values_error_upper / abs(values)` in percent.
 When the estimated load is zero, relative error is undefined; the error preview shows those faces in gray.
 
 The calculation models incident radiation on absorbing, non-emitting surfaces.
@@ -305,84 +303,110 @@ Particle heat flux, wall thermal emission and reflection are not included.
 
 ## Visualization
 
-### Result and error previews
+### Preview results
 
-Use the same rendering configuration to open its output wall URI and radiation source:
+Use the rendering configuration to open the output wall IDS:
 
 ```sh
 pixi run view-results configs/local-radiation.toml
-pixi run view-errors configs/local-radiation.toml relative
-pixi run view-errors configs/local-radiation.toml absolute
+pixi run view-results configs/local-radiation.toml absolute
+pixi run view-results configs/local-radiation.toml relative
 ```
 
-`view-errors` reads all measured component VTK files listed in the output entry's `rendering.json` and groups them in one scene.
-Choose `relative` for relative standard error [%] or `absolute` for standard error [W/m²].
-It does not need to open the radiation IDS.
+The `quantity` argument selects the initially visible wall field: `power` for power density [W/m²], `absolute` for 1σ standard error [W/m²], or `relative` for relative 1σ standard error [%].
+All three pipelines are available in the same ParaView window:
 
-To visualize downloaded HPC results locally, make a local copy of the rendering configuration and update `output.uri` and the input URIs to accessible local or remote locations.
-Copy the whole output directory, including `vtk/` and `rendering.json`, rather than only the HDF5 files.
+- `Radiation load components`: power density.
+- `Absolute error`: absolute standard error.
+- `Relative error`: relative standard error.
 
-The result preview requires exactly one GGD radiation source and a common wall/radiation time slice.
-The result state's selected emissivity array must be available in the radiation IDS; adjust the state template when needed.
+Use the Pipeline Browser's eye icons to show one wall pipeline at a time, and show its corresponding color legend.
+Each pipeline keeps its own color map and range while sharing the geometry and camera.
+Relative errors at zero estimated load are undefined and use the color map's NaN color.
+
+The viewer reads power density, symmetric error bars and geometry from the output wall IDS, matching quantities by `grid_index` and `grid_subset_index`.
+Unmeasured subsets with empty values are omitted.
+Symmetric error bars may have an empty `values_error_lower`.
+When `rendering.json` is present, its component list is checked against the IDS and its sampling metadata is included in the report.
+
+The `emissivity` argument defaults to `true` and controls the radiation-IDS overlay:
+
+- `true`: load the radiation IDS and show emissivity initially.
+- `false`: configure the radiation reader, defer loading the mesh and emissivity arrays, and keep the overlay hidden.
+
+With `false`, the URI and IDS occurrence are already filled in from the rendering configuration.
+Show `Emissivity cells` in the Pipeline Browser to load and display the data.
+If you edit the reader settings in the GUI, press `Apply` to accept them.
+The reader may inspect metadata to populate its properties and available time steps.
+
+To start with emissivity hidden:
+
+```sh
+pixi run view-results configs/local-radiation.toml relative gui false
+```
+
+The overlay requires exactly one GGD radiation source and a common wall/radiation time slice.
+Its selected emissivity array must be available in the radiation IDS; adjust the state template when needed.
 The GGD reader does not apply arbitrary radiation `DBEntry` kwargs.
+
+To visualize downloaded HPC results locally, copy the rendering configuration and update `output.uri` and any overlay source URIs to accessible locations.
+Copy `master.h5` and `wall.h5` together; retain `rendering.json` for convergence, sampling and timing records.
 
 ### Export images
 
-Export to the rendering output entry without specifying a separate destination:
-
 ```sh
-pixi run view-results configs/local-radiation.toml export
-pixi run view-errors configs/local-radiation.toml relative export
+pixi run view-results configs/local-radiation.toml power export
+pixi run view-results configs/local-radiation.toml relative export false
 ```
 
-Exports reuse a fixed directory beneath the output IMAS entry's visualization subdirectory and print its location.
-The subdirectory name is configured in [pixi.toml](pixi.toml).
-Result and error previews use separate `view-results` and `view-errors` directories.
-Each invocation overwrites the matching images, PVSM states and report in that directory.
-An explicit `output_dir` selects a directory elsewhere and also allows existing exports to be overwritten.
+Exports reuse `view-results` beneath the output entry's visualization subdirectory, configured in [pixi.toml](pixi.toml), and print its location.
+Each invocation overwrites matching images, PVSM states and `report.json`.
+The optional `output_dir` argument selects another directory.
 
-`view-results` exports each camera in [radiation-load.pvcvbc](configs/paraview/radiation-load.pvcvbc) with both linear and logarithmic radiation-load colors.
+Each camera in [radiation-load.pvcvbc](configs/paraview/radiation-load.pvcvbc) is exported with the selected quantity.
+Power density uses linear and logarithmic colors; absolute and relative errors use linear colors.
 The side view uses orthographic projection; the other saved views retain perspective projection.
-Images and matching PVSM states are named `radiation-load-<viewpoint>-<scale>.png` and `.pvsm`, with a shared `report.json` recording camera settings, color ranges and image dimensions.
-The emissivity color scale remains as defined in the state template.
-Log exports preserve a positive lower color limit saved in the PVSM, while retaining the upper limit selected by the state's rescaling policy.
-If the saved lower limit is nonpositive, the smallest positive data value is used instead; save a positive lower color limit in the state to keep negligible values from stretching the logarithmic range.
+Images and matching states use these names:
+
+| Quantity | Filename stem |
+| --- | --- |
+| `power` | `radiation-load-<viewpoint>-<scale>` |
+| `absolute` | `radiation-error-absolute-<viewpoint>-linear` |
+| `relative` | `radiation-error-relative-<viewpoint>-linear` |
+
+Every saved state contains all three wall pipelines.
+The report records the selected quantity, component statistics, camera settings, color ranges and image dimensions.
+The emissivity color scale follows the template.
+
+Log exports preserve a positive lower color limit saved in the PVSM and the upper limit selected by the state's rescaling policy.
+If the saved lower limit is nonpositive, the smallest positive data value is used instead.
 Values below the logarithmic lower limit, including zero load, use the color map's below-range color.
-An entirely nonpositive field cannot be exported logarithmically and produces a clear error.
+An entirely nonpositive power-density field cannot be exported logarithmically.
+Log exports use automatic decade labels and minor ticks; linear exports preserve the template's label settings.
 
-Image dimensions and scalar-bar typography are defined together in the shared PVSM, and screenshots use that resolution with proportional font scaling.
-Log exports use ParaView's automatic logarithmic axis with decade labels and intermediate minor ticks; linear exports preserve the template's label settings.
-Exported result PNGs have a transparent background; geometry, color bars and labels retain the template's colors and opacity.
-Adjust those properties in ParaView and save a custom state to change the export formatting.
-The optional final `viewpoints` argument selects a different native custom-viewpoint file.
-
-`view-errors` exports the same saved cameras with linear colors for the chosen error quantity, including orthographic projection for the side view and transparent PNG backgrounds.
-Images and matching states are named `radiation-error-<quantity>-<viewpoint>-linear.png` and `.pvsm`; `report.json` records the latest export, including camera, scalar-bar and color-range settings.
-Error color ranges and typography come from [radiation-errors.pvsm](configs/paraview/radiation-errors.pvsm), which hides the orientation axes by default.
-Undefined relative errors at zero load retain the template's NaN color.
-Both preview tasks accept the optional final `viewpoints` argument to select another native camera-preset file.
+Image dimensions and scalar-bar typography come from the shared PVSM.
+PNG exports have transparent backgrounds and proportional font scaling.
+The optional final `viewpoints` argument selects another native camera-preset file.
 GUI mode saves `scene.png`, `scene.pvsm` and `report.json` when an explicit output directory is supplied.
 
 ### Layouts, colors and saved views
 
-The shared states are [radiation-load.pvsm](configs/paraview/radiation-load.pvsm) and [radiation-errors.pvsm](configs/paraview/radiation-errors.pvsm).
-They store camera, layout, color-map and scalar-bar settings; the tasks bind the data sources from the rendering configuration.
-There is no separate visualization TOML.
+[radiation-load.pvsm](configs/paraview/radiation-load.pvsm) stores the pipelines, camera, layout, color maps and scalar bars.
+The task binds data sources from the rendering configuration; there is no separate visualization TOML.
 
-Adjust the scene in ParaView and save a new state, then pass it as the final task argument:
+Adjust the scene in ParaView, save a state, and pass it as the `template` argument:
 
 ```sh
-pixi run view-results configs/local-radiation.toml gui "" path/to/custom-results.pvsm
-pixi run view-errors configs/local-radiation.toml relative gui "" path/to/custom-errors.pvsm
+pixi run view-results configs/local-radiation.toml power gui true "" path/to/custom.pvsm
 ```
 
-Preserve the named pipeline objects used for data binding when editing a state.
-For results, these include `wall IDS`, `radiation IDS`, `Radiation load components` and `Emissivity cells`.
-For errors, preserve `All components`, `Absolute error` and `Relative error`.
+Preserve `wall IDS`, `Radiation load components`, `Absolute error` and `Relative error` for data binding and quantity selection.
+For the emissivity overlay, also preserve `radiation IDS` and `Emissivity cells`.
+When moving a saved scene to another machine, open it through `view-results` with the saved state as the template to bind local data and reader paths.
 
-The tasks import the bundled UltraPlot Fire and Fire_r color presets, which can also be selected through the GUI preset chooser.
+The task imports the bundled UltraPlot Fire and Fire_r color presets, which are also available through the GUI preset chooser.
 Custom viewpoint buttons are stored separately from PVSM files; import [radiation-load.pvcvbc](configs/paraview/radiation-load.pvcvbc) through **Configure custom viewpoints → Import**.
-To open a general ParaView session with the IMAS plugin enabled, use `pixi run paraview`.
+Use `pixi run paraview` for a general IMAS-enabled ParaView session.
 
 ## Task reference
 
@@ -399,8 +423,7 @@ Arguments are supplied to Pixi tasks rather than directly to Python scripts.
 | `status` | Show submitted job states and saved calculation progress, once or continuously |
 | `render-component` | Worker subtask invoked by generated component job scripts |
 | `merge` | Assemble a finished run into one wall entry |
-| `view-results` | Open or export the wall load and radiation-emissivity scene |
-| `view-errors` | Open or export absolute or relative component errors |
+| `view-results` | Open power-density and error pipelines, or export a selected quantity, with an optional emissivity overlay |
 | `paraview` | Open ParaView with IMAS plugins |
 | `lint` | Check workflow Python scripts with Ruff |
 
@@ -426,7 +449,7 @@ For development checks, run `pixi run lint`.
 | Results exist but errors remain large | Inspect convergence and pass counts in `rendering.json`; the pass limit permits saving unconverged estimates |
 | Relative-error faces are gray | Estimated power density is zero, so relative error is undefined |
 | Result preview reports a missing emissivity field | Select an array present in your radiation IDS and save an adjusted template, using the IMAS-enabled ParaView session |
-| ParaView uses a different installation or lacks IMAS readers | Launch through `pixi run paraview`, `view-results` or `view-errors` in this workspace |
+| ParaView uses a different installation or lacks IMAS readers | Launch through `pixi run paraview`, `view-results` in this workspace |
 
 Input datasets, calculation results and local configurations are excluded from Git.
 The README illustration is kept separately under `docs/images/`.

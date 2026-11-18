@@ -123,6 +123,10 @@ def main() -> int:
                 ):
                     raise ValueError(f"{name}: intermediate result round trip failed")
         merge_results(scratch_config, run, validation=True)
+        if (hdf5_entry_path(scratch_config.output.uri) / "vtk").exists() or any(
+            run.glob("*/power_density.vtk")
+        ):
+            raise ValueError("Result storage must not require or generate VTK files")
         shutil.rmtree(sandbox)
         report["sandbox_removed"] = True
         passed(stage)

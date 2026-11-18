@@ -10,7 +10,7 @@ import numpy as np
 from raysect.core.workflow import MulticoreEngine, SerialEngine
 from raysect.optical import World
 from raysect.optical.observer import MeshCamera, MonoAdaptiveSampler1D, PowerPipeline1D
-from raysect.primitive import Mesh, export_vtk
+from raysect.primitive import Mesh
 
 from _configuration import Config
 from _timing import RenderTiming
@@ -80,11 +80,6 @@ def save_results(
         samples=samples,
     )
     temporary.replace(directory / "power_density.npz")
-    export_vtk(
-        mesh,
-        str(directory / "power_density.vtk"),
-        triangle_data={"PowerDensity": density, "PowerDensityError": error},
-    )
     status: dict[str, object] = dict(
         complete=complete,
         converged=converged,

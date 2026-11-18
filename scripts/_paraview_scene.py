@@ -9,6 +9,7 @@ import tempfile
 import time
 import traceback
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -17,18 +18,29 @@ import imas_paraview
 from paraview import servermanager
 from paraview import simple as pv
 
-from _configuration import Config, RadiationInputConfig
-from view_results import CONFIGS_DIRECTORY, load_render_config
+from _configuration import Config, RadiationInputConfig, hdf5_entry_path
+from _paraview_export import export_viewpoints
+from _paraview_wall import remove_component_inputs, wall_pipeline
+from view_results import CONFIGS_DIRECTORY, TEMP_DIRECTORY, load_render_config
 
 
-def radiation_source(config: Config) -> RadiationInputConfig:
+def radiation_source(config: Config, *, deferred: bool = False) -> RadiationInputConfig:
     """Find the GGD source when a calculation combines core and edge radiation."""
     assert config.radiation is not None
-    candidates = (config.radiation.primary, config.radiation.secondary)
+    candidates = [
+        query
+        for query in (config.radiation.primary, config.radiation.secondary)
+        if query is not None
+    ]
+    if deferred and len(candidates) == 1:
+        source = candidates[0]
+        if source.kwargs:
+            raise ValueError(
+                "The ParaView GGD reader cannot apply radiation DBEntry kwargs; use a self-contained URI"
+            )
+        return source
     sources: list[RadiationInputConfig] = []
     for query in candidates:
-        if query is None:
-            continue
         with imas.DBEntry(query.uri, "r", **query.kwargs) as entry:
             radiation = entry.get("radiation", occurrence=query.occurrence, lazy=True)
             if len(radiation.grid_ggd):
@@ -87,8 +99,9 @@ def load_state_tree(tree: ET.ElementTree, bindings: dict[int, Any] | None = None
         # reducing these composite grids, even with a high view LOD threshold.
         for element in state.findall("./Proxy/Property[@name='SuppressLOD']/Element"):
             element.set("value", "1")
+    TEMP_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix=".radiation-view-state-", dir=os.environ.get("RADLOAD_VIEW_OUTPUT") or None
+        prefix=".radiation-view-state-", dir=TEMP_DIRECTORY
     ) as directory:
         path = Path(directory) / "scene.pvsm"
         tree.write(path, encoding="utf-8", xml_declaration=True)
@@ -106,50 +119,130 @@ def load_state_tree(tree: ET.ElementTree, bindings: dict[int, Any] | None = None
     return pv.GetViews()[0]
 
 
-def load_template(template: Path, config: Config, radiation: RadiationInputConfig) -> Any:
-    """Bind URI/occurrence properties before ParaView opens the data entries.
-
-    Reader names are the template's binding points. GUI-saved states with
-    concrete URIs also work, provided these reader names remain unchanged.
-    """
+def load_template(
+    template: Path, radiation: RadiationInputConfig, wall: Any, *, show_emissivity: bool
+) -> Any:
+    """Bind readers and initial visibility before any representation requests data."""
     tree = ET.parse(template)
     state = tree.getroot().find("ServerManagerState")
     if state is None:
         raise ValueError(f"Not a ParaView state: {template}")
-    bindings = {
-        "wall IDS": (config.output.uri, "wall", config.output.occurrence),
-        "radiation IDS": (radiation.uri, "radiation", radiation.occurrence),
-    }
-    for name, (uri, ids, occurrence) in bindings.items():
-        item = state.find(f"./ProxyCollection[@name='sources']/Item[@name='{name}']")
-        if item is None:
-            raise ValueError(f"Template must contain a reader named {name!r}")
-        proxy = state.find(f"./Proxy[@id='{item.get('id')}']")
-        if proxy is None or proxy.get("type") != "GGDReader":
-            raise ValueError(f"Template source {name!r} must be a GGDReader")
-        selector = proxy.find("./Property[@name='AttributeArraySelector']")
-        if selector is not None:
-            elements = selector.findall("Element")
-            for key, enabled in zip(elements[::2], elements[1::2], strict=True):
-                if enabled.get("value") not in {"0", "1"}:
-                    # ParaView 6.1 can save this plugin's array selection as
-                    # name/name pairs. Restore enabled flags so the invalid
-                    # integer cannot abort the entire reader property update.
-                    if enabled.get("value") != key.get("value"):
-                        raise ValueError(f"Invalid saved array selection in {name!r}")
-                    enabled.set("value", "1")
-        values = {
-            "Enter URI": uri,
-            "IDSAndOccurrence": ids if occurrence == 0 else f"{ids}/{occurrence}",
-        }
-        for key, value in values.items():
-            element = proxy.find(f"./Property[@name='{key}']/Element")
-            if element is None:
-                raise ValueError(f"Template reader {name!r} is missing {key!r}")
-            element.set("value", value)
-    # URI strings are custom plugin properties, so LoadState's filename relocation
-    # does not apply. Write the bound state temporarily, leaving the template intact.
-    return load_state_tree(tree)
+    wall_item = state.find("./ProxyCollection[@name='sources']/Item[@name='wall IDS']")
+    if wall_item is None:
+        raise ValueError("Template must contain a source named 'wall IDS'")
+    wall_id = int(wall_item.attrib["id"])
+    remove_component_inputs(state, wall_id)
+    bindings = {wall_id: wall}
+    item = state.find("./ProxyCollection[@name='sources']/Item[@name='radiation IDS']")
+    if item is None:
+        raise ValueError("Template must contain a reader named 'radiation IDS'")
+    proxy_id = int(item.attrib["id"])
+    proxy = state.find(f"./Proxy[@id='{proxy_id}']")
+    if proxy is None or proxy.get("type") != "GGDReader":
+        # A wall-only saved state has an empty source at this binding point.
+        default = ET.parse(CONFIGS_DIRECTORY / "paraview/radiation-load.pvsm")
+        default_state = default.getroot().find("ServerManagerState")
+        assert default_state is not None
+        reader = default_state.find(
+            "./ProxyCollection[@name='sources']/Item[@name='radiation IDS']"
+        )
+        assert reader is not None
+        original_id = reader.attrib["id"]
+        prototype = default_state.find(f"./Proxy[@id='{original_id}']")
+        assert prototype is not None
+        if proxy is not None:
+            state.remove(proxy)
+        proxy = deepcopy(prototype)
+        for child in proxy.iter():
+            if child.get("id", "").split(".", 1)[0] == original_id:
+                child.set("id", str(proxy_id) + child.attrib["id"][len(original_id) :])
+        state.append(proxy)
+    selector = proxy.find("./Property[@name='AttributeArraySelector']")
+    if selector is not None:
+        elements = selector.findall("Element")
+        for key, enabled in zip(elements[::2], elements[1::2], strict=True):
+            if enabled.get("value") not in {"0", "1"}:
+                # ParaView 6.1 can save name/name pairs for this plugin.
+                if enabled.get("value") != key.get("value"):
+                    raise ValueError("Invalid saved radiation array selection")
+                enabled.set("value", "1")
+    for key, value in {
+        "Enter URI": radiation.uri,
+        "IDSAndOccurrence": "radiation"
+        if radiation.occurrence == 0
+        else f"radiation/{radiation.occurrence}",
+    }.items():
+        element = proxy.find(f"./Property[@name='{key}']/Element")
+        if element is None:
+            raise ValueError(f"Template radiation reader is missing {key!r}")
+        element.set("value", value)
+    # Metadata stays available to the GUI, while geometry and field arrays are
+    # requested only when this branch is executed or displayed.
+    if not show_emissivity:
+        lazy = proxy.find("./Property[@name='LazyLoading']/Element")
+        if lazy is not None:
+            lazy.set("value", "1")
+        deferred = {str(proxy_id)}
+        for _ in range(len(state.findall("Proxy"))):
+            descendants = {
+                node.attrib["id"]
+                for node in state.findall("Proxy")
+                if any(
+                    p.get("value") in deferred
+                    for p in node.findall("./Property[@name='Input']/Proxy")
+                )
+            }
+            if descendants <= deferred:
+                break
+            deferred.update(descendants)
+        tables: set[str] = set()
+        for node in state.findall("Proxy"):
+            if node.get("id") in deferred and node.get("group") == "representations":
+                visibility = node.find("./Property[@name='Visibility']/Element")
+                if visibility is not None:
+                    visibility.set("value", "0")
+                table = node.find("./Property[@name='LookupTable']/Proxy")
+                if table is not None:
+                    tables.add(table.attrib["value"])
+        for node in state.findall("./Proxy[@type='ScalarBarWidgetRepresentation']"):
+            table = node.find("./Property[@name='LookupTable']/Proxy")
+            if table is not None and table.get("value") in tables:
+                node.find("./Property[@name='Visibility']/Element").set("value", "0")
+    return load_state_tree(tree, bindings)
+
+
+WALL_QUANTITIES = {
+    "power": ("Radiation load components", "radiation-load"),
+    "absolute": ("Absolute error", "radiation-error-absolute"),
+    "relative": ("Relative error", "radiation-error-relative"),
+}
+
+
+def select_quantity(view: Any, quantity: str) -> tuple[Any, Any]:
+    """Show one wall branch and its scalar bar while keeping the camera and overlay."""
+    if quantity not in WALL_QUANTITIES:
+        raise ValueError("Use the power/absolute/relative quantities defined in view-results")
+    selected: tuple[Any, Any] | None = None
+    for name, (source_name, _) in WALL_QUANTITIES.items():
+        source = pv.FindSource(source_name)
+        if source is None:
+            raise ValueError(f"Template must contain a source named {source_name!r}")
+        source.UpdatePipeline()
+        display = pv.GetDisplayProperties(source, view)
+        visible = name == quantity
+        display.Visibility = int(visible)
+        display.SetScalarBarVisibility(view, visible)
+        if visible:
+            array = display.ColorArrayName[1]
+            if array not in source.CellData.keys():
+                raise ValueError(f"Template wall field {array!r} is unavailable")
+            if display.LookupTable.AutomaticRescaleRangeMode != "Never":
+                display.RescaleTransferFunctionToDataRange(False, True)
+            selected = source, display
+    assert selected is not None
+    pv.SetActiveView(view)
+    pv.SetActiveSource(selected[0])
+    return selected
 
 
 def times(source: Any) -> list[float]:
@@ -161,84 +254,100 @@ def build() -> dict[str, Any]:
     start = time.monotonic()
     config = load_render_config(Path(os.environ["RADLOAD_VIEW_CONFIG"]))
     template = Path(os.environ["RADLOAD_VIEW_TEMPLATE"])
-    radiation = radiation_source(config)
+    quantity = os.environ["RADLOAD_VIEW_QUANTITY"]
+    if quantity not in WALL_QUANTITIES:
+        raise ValueError("Use the power/absolute/relative quantities defined in view-results")
+    emissivity = os.environ["RADLOAD_VIEW_EMISSIVITY"]
+    if emissivity not in {"true", "false"}:
+        raise ValueError("Use the true/false emissivity options defined in view-results")
+    show_emissivity = emissivity == "true"
+    radiation = radiation_source(config, deferred=not show_emissivity)
     pv._DisableFirstRenderCameraReset()
     presets = CONFIGS_DIRECTORY / "colormaps/ultraplot-fire.json"
     if not pv.ImportPresets(str(presets)):
         raise RuntimeError(f"Could not import color presets: {presets}")
+    wall, statistics, selected_time = wall_pipeline(config.output.uri, config.output.occurrence)
+    manifest_path = hdf5_entry_path(config.output.uri) / "rendering.json"
+    sampling = json.loads(manifest_path.read_text()) if manifest_path.is_file() else None
+    if sampling is not None:
+        expected = set(sampling["components"])
+        actual = set(statistics)
+        if expected != actual:
+            raise ValueError(
+                "Measured wall IDS subsets differ from rendering.json components: "
+                f"missing={sorted(expected - actual)}, unexpected={sorted(actual - expected)}"
+            )
+    if wall.GetDataInformation().GetNumberOfCells() != sum(
+        item["cells"] for item in statistics.values()
+    ):
+        raise ValueError("The wall scene does not contain every measured component face")
     pv.LoadPlugin(str(Path(imas_paraview.__path__[0]) / "plugins/vtkggdreader.py"), remote=False)
-    view = load_template(template, config, radiation)
-    wall = pv.FindSource("wall IDS")
-    emission = pv.FindSource("radiation IDS")
-    components = pv.FindSource("Radiation load components")
+    view = load_template(template, radiation, wall, show_emissivity=show_emissivity)
     plane = pv.FindSource("Emissivity cells")
-    if any(source is None for source in (wall, emission, components, plane)):
-        raise ValueError(
-            "Template is missing the wall/radiation readers or their component/cell filters"
+    emission_report: dict[str, Any] = dict(
+        uri=radiation.uri,
+        occurrence=radiation.occurrence,
+        loaded=False,
+        initially_visible=show_emissivity,
+    )
+    if show_emissivity:
+        emission = pv.FindSource("radiation IDS")
+        if emission is None or plane is None:
+            raise ValueError("Template must contain 'radiation IDS' and 'Emissivity cells'")
+        emission.UpdatePipelineInformation()
+        emission_times = times(emission)
+        if not emission_times:
+            raise ValueError("Radiation IDS must provide a time slice")
+        emission_time = min(emission_times, key=lambda t: abs(t - selected_time))
+        if not math.isclose(emission_time, selected_time, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(
+                f"No common wall/radiation time slice: wall={selected_time}, radiation={emission_times}"
+            )
+        plane.UpdatePipeline(selected_time)
+        if plane.GetDataInformation().GetNumberOfCells() == 0:
+            raise ValueError("No radiation cells to display with this template")
+        emission_display = pv.GetDisplayProperties(plane, view)
+        emission_array = emission_display.ColorArrayName[1]
+        if emission_array not in plane.CellData.keys():
+            raise ValueError(
+                f"Template emissivity field {emission_array!r} is unavailable; change it in the state template"
+            )
+        emission_display.Visibility = int(emissivity == "true")
+        emission_display.SetScalarBarVisibility(view, emissivity == "true")
+        emission_report = dict(
+            uri=radiation.uri,
+            occurrence=radiation.occurrence,
+            array=emission_array,
+            cells=plane.GetDataInformation().GetNumberOfCells(),
+            opacity=emission_display.Opacity,
+            log_scale=bool(emission_display.LookupTable.UseLogScale),
+            initially_visible=True,
+            loaded=True,
         )
-    wall.UpdatePipelineInformation()
-    emission.UpdatePipelineInformation()
-    wall_times, emission_times = times(wall), times(emission)
-    if not wall_times or not emission_times:
-        raise ValueError("Both IDSs must provide a time slice")
-    assert config.radiation is not None and config.radiation.primary.time is not None
-    selected = min(wall_times, key=lambda t: abs(t - config.radiation.primary.time))
-    emission_time = min(emission_times, key=lambda t: abs(t - selected))
-    if not math.isclose(emission_time, selected, rel_tol=1e-9, abs_tol=1e-9):
-        raise ValueError(
-            f"No common wall/radiation time slice: wall={selected}, radiation={emission_times}"
-        )
-    wall.UpdatePipeline(selected)
-    assembly = wall.GetDataInformation().GetDataAssembly()
-    if assembly is None:
-        raise ValueError("Wall IDS has no component grid_subset assembly")
-    children = [assembly.GetChild(0, i) for i in range(assembly.GetNumberOfChildren(0))]
-    # Exclude the whole-mesh partition, which duplicates the component subsets.
-    subsets = [node for node in children if 0 not in assembly.GetDataSetIndices(node, False)]
-    components.Selectors = [
-        f"/{assembly.GetNodeName(0)}/{assembly.GetNodeName(node)}" for node in subsets or children
-    ]
-    components.UpdatePipeline(selected)
-    plane.UpdatePipeline(selected)
-    for name, source in (("wall", components), ("radiation", plane)):
-        if source.GetDataInformation().GetNumberOfCells() == 0:
-            raise ValueError(f"No {name} cells to display with this template")
+    elif plane is not None:
+        display = pv.GetDisplayProperties(plane, view)
+        display.Visibility = 0
+        display.SetScalarBarVisibility(view, False)
     export_size = tuple(view.ViewSize)
     mode = os.environ["RADLOAD_VIEW_MODE"]
-    # GUI dimensions belong to Qt; only impose the template's resolution offscreen.
     if mode == "export":
         pv.GetLayout(view).SetSize(*export_size)
-    view.ViewTime = selected
+    view.ViewTime = selected_time
     animation = pv.GetAnimationScene()
     animation.UpdateAnimationUsingDataTimeSteps()
-    animation.AnimationTime = selected
+    animation.AnimationTime = selected_time
     caption = pv.FindSource("Time slice")
     if caption is not None:
-        caption.Text = f"t = {selected:.7g} s"
-    # Keep colors/styles from the template; adapt the wall range to the new result.
-    wall_display = pv.GetDisplayProperties(components, view)
-    array = wall_display.ColorArrayName[1]
-    if array not in components.CellData.keys():
-        raise ValueError(f"Template wall field {array!r} is unavailable")
-    limits = tuple(components.CellData[array].GetRange(0))
-    if not all(math.isfinite(v) for v in limits):
-        raise ValueError(f"No finite wall data in {array!r}")
-    if wall_display.LookupTable.AutomaticRescaleRangeMode != "Never":
-        wall_display.RescaleTransferFunctionToDataRange(False, True)
-    emission_display = pv.GetDisplayProperties(plane, view)
-    emission_array = emission_display.ColorArrayName[1]
-    if emission_array not in plane.CellData.keys():
-        raise ValueError(
-            f"Template emissivity field {emission_array!r} is unavailable; change it in the state template"
-        )
-    pv.SetActiveView(view)
-    pv.SetActiveSource(components)
+        caption.Text = f"t = {selected_time:.7g} s"
+    source, display = select_quantity(view, quantity)
     pv.Render(view)
+    colors = list(display.LookupTable.RGBPoints)
     report = dict(
         status="ready",
         config=str(config.source),
         template=str(template),
-        time=selected,
+        quantity=quantity,
+        time=selected_time,
         view=dict(
             mode=mode,
             size=list(view.ViewSize),
@@ -249,33 +358,33 @@ def build() -> dict[str, Any]:
         wall=dict(
             uri=config.output.uri,
             occurrence=config.output.occurrence,
-            array=array,
-            cells=components.GetDataInformation().GetNumberOfCells(),
-            color_range=limits,
+            array=display.ColorArrayName[1],
+            cells=source.GetDataInformation().GetNumberOfCells(),
+            color_range=[float(colors[0]), float(colors[-4])],
+            components=statistics,
         ),
-        emissivity=dict(
-            uri=radiation.uri,
-            occurrence=radiation.occurrence,
-            array=emission_array,
-            cells=plane.GetDataInformation().GetNumberOfCells(),
-            opacity=emission_display.Opacity,
-            log_scale=bool(emission_display.LookupTable.UseLogScale),
-        ),
+        emissivity=emission_report,
+        sampling=sampling,
+        uncertainty="1-sigma Monte Carlo standard error of the mean [W m-2]",
+        relative_error="100 * standard_error / abs(power_density); NaN at zero load",
         elapsed_seconds=time.monotonic() - start,
     )
     if destination := os.environ.get("RADLOAD_VIEW_OUTPUT"):
         directory = Path(destination)
         if mode == "export":
-            from _paraview_export import export_viewpoints
-
+            source_name, prefix = WALL_QUANTITIES[quantity]
             report["exports"] = export_viewpoints(
                 view,
-                components,
-                wall_display,
+                source,
+                display,
                 directory,
                 Path(os.environ["RADLOAD_VIEW_VIEWPOINTS"]),
                 export_size,
                 template=template,
+                source_name=source_name,
+                filename_prefix=prefix,
+                allow_nan=quantity == "relative",
+                include_log=quantity == "power",
             )
             report["viewpoints"] = os.environ["RADLOAD_VIEW_VIEWPOINTS"]
         else:
@@ -285,13 +394,19 @@ def build() -> dict[str, Any]:
         (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if mode == "gui":
             pv.Render(view)
-    print(f"Ready: radiation load + emissivity at t={selected:.7g} s", flush=True)
+    print(
+        f"Ready: {quantity} at t={selected_time:.7g} s ({len(statistics)} components)", flush=True
+    )
     return report
 
 
 if __name__ == "__main__":
+    # ProgrammableSource populates __main__ with NumPy names. Keep scene
+    # functions in a module namespace so Python builtins retain their meaning.
+    from _paraview_scene import build as build_scene
+
     try:
-        build()
+        build_scene()
     except Exception as error:
         if destination := os.environ.get("RADLOAD_VIEW_OUTPUT"):
             (Path(destination) / "report.json").write_text(
