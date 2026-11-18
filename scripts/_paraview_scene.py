@@ -5,23 +5,23 @@ from __future__ import annotations
 import json
 import math
 import os
-import tempfile
 import time
 import traceback
 import xml.etree.ElementTree as ET
-from copy import deepcopy
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import imas
 import imas_paraview
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from paraview import servermanager
 from paraview import simple as pv
 
 from _configuration import Config, RadiationInputConfig, hdf5_entry_path
 from _paraview_export import export_viewpoints
 from _paraview_wall import remove_component_inputs, wall_pipeline
-from view_results import CONFIGS_DIRECTORY, TEMP_DIRECTORY, load_render_config
+from view_results import CONFIGS_DIRECTORY, load_render_config
 
 
 def radiation_source(config: Config, *, deferred: bool = False) -> RadiationInputConfig:
@@ -32,19 +32,14 @@ def radiation_source(config: Config, *, deferred: bool = False) -> RadiationInpu
         for query in (config.radiation.primary, config.radiation.secondary)
         if query is not None
     ]
-    if deferred and len(candidates) == 1:
-        source = candidates[0]
-        if source.kwargs:
-            raise ValueError(
-                "The ParaView GGD reader cannot apply radiation DBEntry kwargs; use a self-contained URI"
-            )
-        return source
-    sources: list[RadiationInputConfig] = []
-    for query in candidates:
-        with imas.DBEntry(query.uri, "r", **query.kwargs) as entry:
-            radiation = entry.get("radiation", occurrence=query.occurrence, lazy=True)
-            if len(radiation.grid_ggd):
-                sources.append(query)
+    sources = candidates
+    if not deferred or len(candidates) > 1:
+        sources = []
+        for query in candidates:
+            with imas.DBEntry(query.uri, "r", **query.kwargs) as entry:
+                radiation = entry.get("radiation", occurrence=query.occurrence, lazy=True)
+                if len(radiation.grid_ggd):
+                    sources.append(query)
     if len(sources) != 1:
         raise ValueError(
             f"The shared scene requires exactly one GGD radiation source; found {len(sources)}"
@@ -57,106 +52,37 @@ def radiation_source(config: Config, *, deferred: bool = False) -> RadiationInpu
     return source
 
 
-def load_gui_state(path: Path, state: ET.Element, bindings: dict[int, Any] | None = None) -> Any:
-    """Restore a state into the existing Qt view without replacing its render widget."""
-    view = pv.GetActiveViewOrCreate("RenderView")
-    layout = pv.GetLayout(view)
-    view_xml = state.find("./Proxy[@type='RenderView']")
-    layout_xml = state.find("./Proxy[@type='ViewLayout']")
-    if view_xml is None or layout_xml is None:
-        raise ValueError("The state template must contain a render view and its layout")
-    loader = servermanager.vtkSMStateLoader()
-    loader.SetSession(servermanager.ActiveConnection.Session)
-    for proxy_id, proxy in (bindings or {}).items():
-        loader.GetProxyLocator().AssignProxy(proxy_id, proxy.SMProxy)
-    for element, proxy in ((view_xml, view), (layout_xml, layout)):
-        loader.GetProxyLocator().AssignProxy(int(element.attrib["id"]), proxy.SMProxy)
-    servermanager.ProxyManager().LoadState(str(path), loader)
-    # Assigned proxies are reused without restoring their XML properties. Apply
-    # the view settings explicitly once representation references can be resolved.
-    # Keep Qt's actual viewport dimensions rather than the saved export resolution.
-    size = view_xml.find("./Property[@name='ViewSize']")
-    if size is not None:
-        for element, value in zip(size.findall("Element"), view.ViewSize, strict=True):
-            element.set("value", str(value))
-    parser = servermanager.vtkPVXMLParser()
-    if not parser.Parse(ET.tostring(view_xml, encoding="unicode")):
-        raise ValueError("Could not parse the template render view")
-    if not view.SMProxy.LoadXMLState(parser.GetRootElement(), loader.GetProxyLocator()):
-        raise RuntimeError("Could not restore the template render view")
-    view.UpdateVTKObjects()
-    pv.SetActiveView(view)
-    return view
+def render_template(path: Path, context: dict[str, str | bool]) -> ET.Element:
+    env = Environment(
+        loader=FileSystemLoader(path.parent), autoescape=True, undefined=StrictUndefined
+    )
+    return ET.fromstring(env.get_template(path.name).render(context))
 
 
-def load_state_tree(tree: ET.ElementTree, bindings: dict[int, Any] | None = None) -> Any:
-    """Load a bound state, preserving the live Qt view in interactive sessions."""
-    state = tree.getroot().find("ServerManagerState")
-    if state is None:
-        raise ValueError("Not a ParaView state")
-    if os.environ["RADLOAD_VIEW_MODE"] == "export":
-        # Export full geometry. VTK's quadric LOD filter can also crash when
-        # reducing these composite grids, even with a high view LOD threshold.
-        for element in state.findall("./Proxy/Property[@name='SuppressLOD']/Element"):
-            element.set("value", "1")
-    TEMP_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=".radiation-view-state-", dir=TEMP_DIRECTORY
-    ) as directory:
-        path = Path(directory) / "scene.pvsm"
-        tree.write(path, encoding="utf-8", xml_declaration=True)
-        if os.environ["RADLOAD_VIEW_MODE"] == "gui":
-            return load_gui_state(path, state, bindings)
-        if bindings:
-            pv.RemoveViewsAndLayouts()
-            loader = servermanager.vtkSMStateLoader()
-            loader.SetSession(servermanager.ActiveConnection.Session)
-            for proxy_id, proxy in bindings.items():
-                loader.GetProxyLocator().AssignProxy(proxy_id, proxy.SMProxy)
-            servermanager.ProxyManager().LoadState(str(path), loader)
-        else:
-            pv.LoadState(str(path))
-    return pv.GetViews()[0]
-
-
-def load_template(
-    template: Path, radiation: RadiationInputConfig, wall: Any, *, show_emissivity: bool
-) -> Any:
-    """Bind readers and initial visibility before any representation requests data."""
-    tree = ET.parse(template)
-    state = tree.getroot().find("ServerManagerState")
-    if state is None:
-        raise ValueError(f"Not a ParaView state: {template}")
-    wall_item = state.find("./ProxyCollection[@name='sources']/Item[@name='wall IDS']")
-    if wall_item is None:
-        raise ValueError("Template must contain a source named 'wall IDS'")
-    wall_id = int(wall_item.attrib["id"])
-    remove_component_inputs(state, wall_id)
-    bindings = {wall_id: wall}
-    item = state.find("./ProxyCollection[@name='sources']/Item[@name='radiation IDS']")
+def source_id(state: ET.Element, name: str) -> str:
+    item = state.find(f"./ProxyCollection[@name='sources']/Item[@name='{name}']")
     if item is None:
-        raise ValueError("Template must contain a reader named 'radiation IDS'")
-    proxy_id = int(item.attrib["id"])
+        raise ValueError(f"State must contain a source named {name!r}")
+    return item.attrib["id"]
+
+
+def bind_saved_state(state: ET.Element, context: dict[str, str | bool]) -> None:
+    """Rebind a native GUI state, including older states with an empty radiation source."""
+    remove_component_inputs(state, source_id(state, "wall IDS"))
+    proxy_id = source_id(state, "radiation IDS")
     proxy = state.find(f"./Proxy[@id='{proxy_id}']")
     if proxy is None or proxy.get("type") != "GGDReader":
-        # A wall-only saved state has an empty source at this binding point.
-        default = ET.parse(CONFIGS_DIRECTORY / "paraview/radiation-load.pvsm")
-        default_state = default.getroot().find("ServerManagerState")
-        assert default_state is not None
-        reader = default_state.find(
-            "./ProxyCollection[@name='sources']/Item[@name='radiation IDS']"
-        )
-        assert reader is not None
-        original_id = reader.attrib["id"]
-        prototype = default_state.find(f"./Proxy[@id='{original_id}']")
+        default = render_template(CONFIGS_DIRECTORY / "paraview/radiation-load.pvsm.j2", context)
+        prototype = default.find("./ServerManagerState/Proxy[@type='GGDReader']")
         assert prototype is not None
+        original_id = prototype.attrib["id"]
+        for child in prototype.iter():
+            if child.get("id", "").partition(".")[0] == original_id:
+                child.set("id", proxy_id + child.attrib["id"][len(original_id) :])
         if proxy is not None:
             state.remove(proxy)
-        proxy = deepcopy(prototype)
-        for child in proxy.iter():
-            if child.get("id", "").split(".", 1)[0] == original_id:
-                child.set("id", str(proxy_id) + child.attrib["id"][len(original_id) :])
-        state.append(proxy)
+        state.append(prototype)
+        proxy = prototype
     selector = proxy.find("./Property[@name='AttributeArraySelector']")
     if selector is not None:
         elements = selector.findall("Element")
@@ -167,34 +93,29 @@ def load_template(
                     raise ValueError("Invalid saved radiation array selection")
                 enabled.set("value", "1")
     for key, value in {
-        "Enter URI": radiation.uri,
-        "IDSAndOccurrence": "radiation"
-        if radiation.occurrence == 0
-        else f"radiation/{radiation.occurrence}",
+        "Enter URI": context["radiation_uri"],
+        "IDSAndOccurrence": context["radiation_ids"],
     }.items():
         element = proxy.find(f"./Property[@name='{key}']/Element")
         if element is None:
             raise ValueError(f"Template radiation reader is missing {key!r}")
-        element.set("value", value)
+        element.set("value", str(value))
     # Metadata stays available to the GUI, while geometry and field arrays are
     # requested only when this branch is executed or displayed.
-    if not show_emissivity:
+    if not context["show_emissivity"]:
         lazy = proxy.find("./Property[@name='LazyLoading']/Element")
         if lazy is not None:
             lazy.set("value", "1")
-        deferred = {str(proxy_id)}
-        for _ in range(len(state.findall("Proxy"))):
-            descendants = {
-                node.attrib["id"]
-                for node in state.findall("Proxy")
-                if any(
-                    p.get("value") in deferred
-                    for p in node.findall("./Property[@name='Input']/Proxy")
-                )
-            }
-            if descendants <= deferred:
-                break
-            deferred.update(descendants)
+        consumers: dict[str, set[str]] = defaultdict(set)
+        for node in state.iterfind("Proxy"):
+            for input_proxy in node.iterfind("./Property[@name='Input']/Proxy"):
+                consumers[input_proxy.attrib["value"]].add(node.attrib["id"])
+        deferred = set()
+        pending = {proxy_id}
+        while pending:
+            current = pending.pop()
+            deferred.add(current)
+            pending.update(consumers[current] - deferred)
         tables: set[str] = set()
         for node in state.findall("Proxy"):
             if node.get("id") in deferred and node.get("group") == "representations":
@@ -208,7 +129,55 @@ def load_template(
             table = node.find("./Property[@name='LookupTable']/Proxy")
             if table is not None and table.get("value") in tables:
                 node.find("./Property[@name='Visibility']/Element").set("value", "0")
-    return load_state_tree(tree, bindings)
+    if context["export"]:
+        for element in state.findall("./Proxy/Property[@name='SuppressLOD']/Element"):
+            element.set("value", "1")
+
+
+def vtk_xml(element: ET.Element) -> Any:
+    parser = servermanager.vtkPVXMLParser()
+    if not parser.Parse(ET.tostring(element, encoding="unicode")):
+        raise ValueError(f"ParaView could not parse {element.tag}")
+    return parser.GetRootElement()
+
+
+def load_scene(template: Path, wall: Any, context: dict[str, str | bool]) -> tuple[Any, ET.Element]:
+    """Restore the state with the run's wall source and preserve the live Qt view."""
+    native = template.suffix != ".j2"
+    root = ET.parse(template).getroot() if native else render_template(template, context)
+    state = root.find("ServerManagerState")
+    if state is None:
+        raise ValueError(f"Not a ParaView state: {template}")
+    if native:
+        bind_saved_state(state, context)
+    loader = servermanager.vtkSMStateLoader()
+    loader.SetSession(servermanager.ActiveConnection.Session)
+    locator = loader.GetProxyLocator()
+    locator.AssignProxy(int(source_id(state, "wall IDS")), wall.SMProxy)
+    manager = servermanager.ProxyManager().SMProxyManager
+    if context["export"]:
+        pv.RemoveViewsAndLayouts()
+        manager.LoadXMLState(vtk_xml(root), loader)
+        return pv.GetViews()[0], state
+
+    view = pv.GetActiveViewOrCreate("RenderView")
+    view_xml = state.find("./Proxy[@type='RenderView']")
+    layout_xml = state.find("./Proxy[@type='ViewLayout']")
+    if view_xml is None or layout_xml is None:
+        raise ValueError("The state template must contain a render view and its layout")
+    locator.AssignProxy(int(view_xml.attrib["id"]), view.SMProxy)
+    locator.AssignProxy(int(layout_xml.attrib["id"]), pv.GetLayout(view).SMProxy)
+    manager.LoadXMLState(vtk_xml(root), loader)
+    # Reused views need their properties restored after representations are bound.
+    size = view_xml.find("./Property[@name='ViewSize']")
+    if size is not None:
+        for element, value in zip(size.findall("Element"), view.ViewSize, strict=True):
+            element.set("value", str(value))
+    if not view.SMProxy.LoadXMLState(vtk_xml(view_xml), locator):
+        raise RuntimeError("Could not restore the template render view")
+    view.UpdateVTKObjects()
+    pv.SetActiveView(view)
+    return view, state
 
 
 WALL_QUANTITIES = {
@@ -218,36 +187,30 @@ WALL_QUANTITIES = {
 }
 
 
-def select_quantity(view: Any, quantity: str) -> tuple[Any, Any]:
-    """Show one wall branch and its scalar bar while keeping the camera and overlay."""
-    if quantity not in WALL_QUANTITIES:
-        raise ValueError("Use the power/absolute/relative quantities defined in view-results")
-    selected: tuple[Any, Any] | None = None
-    for name, (source_name, _) in WALL_QUANTITIES.items():
-        source = pv.FindSource(source_name)
-        if source is None:
-            raise ValueError(f"Template must contain a source named {source_name!r}")
-        source.UpdatePipeline()
-        display = pv.GetDisplayProperties(source, view)
-        visible = name == quantity
-        display.Visibility = int(visible)
-        display.SetScalarBarVisibility(view, visible)
-        if visible:
-            array = display.ColorArrayName[1]
-            if array not in source.CellData.keys():
-                raise ValueError(f"Template wall field {array!r} is unavailable")
-            if display.LookupTable.AutomaticRescaleRangeMode != "Never":
-                display.RescaleTransferFunctionToDataRange(False, True)
-            selected = source, display
-    assert selected is not None
+def select_quantity(view: Any, quantity: str, *, saved_state: bool) -> tuple[Any, Any]:
+    """Activate the selected wall field and apply the saved color range policy."""
+    if saved_state:
+        for key, (name, _) in WALL_QUANTITIES.items():
+            branch = pv.FindSource(name)
+            if branch is None:
+                raise ValueError(f"State must contain a source named {name!r}")
+            display = pv.GetDisplayProperties(branch, view)
+            display.Visibility = int(key == quantity)
+            display.SetScalarBarVisibility(view, key == quantity)
+    name, _ = WALL_QUANTITIES[quantity]
+    source = pv.FindSource(name)
+    if source is None:
+        raise ValueError(f"State must contain a source named {name!r}")
+    source.UpdatePipeline()
+    display = pv.GetDisplayProperties(source, view)
+    array = display.ColorArrayName[1]
+    if array not in source.CellData.keys():
+        raise ValueError(f"Template wall field {array!r} is unavailable")
+    if display.LookupTable.AutomaticRescaleRangeMode != "Never":
+        display.RescaleTransferFunctionToDataRange(False, True)
     pv.SetActiveView(view)
-    pv.SetActiveSource(selected[0])
-    return selected
-
-
-def times(source: Any) -> list[float]:
-    values = source.GetProperty("TimestepValues")
-    return [float(values[i]) for i in range(len(values))]
+    pv.SetActiveSource(source)
+    return source, display
 
 
 def build() -> dict[str, Any]:
@@ -282,7 +245,20 @@ def build() -> dict[str, Any]:
     ):
         raise ValueError("The wall scene does not contain every measured component face")
     pv.LoadPlugin(str(Path(imas_paraview.__path__[0]) / "plugins/vtkggdreader.py"), remote=False)
-    view = load_template(template, radiation, wall, show_emissivity=show_emissivity)
+    mode = os.environ["RADLOAD_VIEW_MODE"]
+    view, state = load_scene(
+        template,
+        wall,
+        dict(
+            radiation_uri=radiation.uri,
+            radiation_ids=f"radiation/{radiation.occurrence}"
+            if radiation.occurrence
+            else "radiation",
+            show_emissivity=show_emissivity,
+            quantity=quantity,
+            export=mode == "export",
+        ),
+    )
     plane = pv.FindSource("Emissivity cells")
     emission_report: dict[str, Any] = dict(
         uri=radiation.uri,
@@ -295,7 +271,7 @@ def build() -> dict[str, Any]:
         if emission is None or plane is None:
             raise ValueError("Template must contain 'radiation IDS' and 'Emissivity cells'")
         emission.UpdatePipelineInformation()
-        emission_times = times(emission)
+        emission_times = emission.GetProperty("TimestepValues")[:]
         if not emission_times:
             raise ValueError("Radiation IDS must provide a time slice")
         emission_time = min(emission_times, key=lambda t: abs(t - selected_time))
@@ -312,24 +288,17 @@ def build() -> dict[str, Any]:
             raise ValueError(
                 f"Template emissivity field {emission_array!r} is unavailable; change it in the state template"
             )
-        emission_display.Visibility = int(emissivity == "true")
-        emission_display.SetScalarBarVisibility(view, emissivity == "true")
-        emission_report = dict(
-            uri=radiation.uri,
-            occurrence=radiation.occurrence,
+        if template.suffix != ".j2":
+            emission_display.Visibility = 1
+            emission_display.SetScalarBarVisibility(view, True)
+        emission_report.update(
             array=emission_array,
             cells=plane.GetDataInformation().GetNumberOfCells(),
             opacity=emission_display.Opacity,
             log_scale=bool(emission_display.LookupTable.UseLogScale),
-            initially_visible=True,
             loaded=True,
         )
-    elif plane is not None:
-        display = pv.GetDisplayProperties(plane, view)
-        display.Visibility = 0
-        display.SetScalarBarVisibility(view, False)
     export_size = tuple(view.ViewSize)
-    mode = os.environ["RADLOAD_VIEW_MODE"]
     if mode == "export":
         pv.GetLayout(view).SetSize(*export_size)
     view.ViewTime = selected_time
@@ -339,7 +308,7 @@ def build() -> dict[str, Any]:
     caption = pv.FindSource("Time slice")
     if caption is not None:
         caption.Text = f"t = {selected_time:.7g} s"
-    source, display = select_quantity(view, quantity)
+    source, display = select_quantity(view, quantity, saved_state=template.suffix != ".j2")
     pv.Render(view)
     colors = list(display.LookupTable.RGBPoints)
     report = dict(
@@ -380,7 +349,7 @@ def build() -> dict[str, Any]:
                 directory,
                 Path(os.environ["RADLOAD_VIEW_VIEWPOINTS"]),
                 export_size,
-                template=template,
+                state=state,
                 source_name=source_name,
                 filename_prefix=prefix,
                 allow_nan=quantity == "relative",

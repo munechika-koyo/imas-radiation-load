@@ -61,7 +61,7 @@ def wall_pipeline(uri: str, occurrence: int) -> tuple[Any, dict[str, dict[str, A
     return group, statistics, time
 
 
-def remove_component_inputs(state: ET.Element, proxy_id: int) -> None:
+def remove_component_inputs(state: ET.Element, proxy_id: str) -> None:
     """Remove saved upstream readers so a GUI-saved template can bind a different run."""
     proxies = {proxy.attrib["id"]: proxy for proxy in state.findall("Proxy")}
     removed: set[str] = set()
@@ -75,12 +75,13 @@ def remove_component_inputs(state: ET.Element, proxy_id: int) -> None:
             for reference in proxy.findall("./Property[@name='Input']/Proxy"):
                 visit(reference.attrib["value"])
 
-    root = str(proxy_id)
-    visit(root)
+    visit(proxy_id)
     for current in removed:
         if current in proxies:
             state.remove(proxies[current])
-    upstream = removed - {root}
+    upstream = removed - {proxy_id}
+    if not upstream:
+        return
     for parent in state.iter():
         for child in list(parent):
             if (child.tag == "Proxy" and child.get("value") in upstream) or (

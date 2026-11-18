@@ -222,7 +222,7 @@ args = [
   { arg = "mode", default = "gui", choices = ["gui", "export"] },  # Open an interactive window, or render offscreen.
   { arg = "emissivity", default = "true", choices = ["false", "true"] },  # true: load and show; false: configure the reader, defer data loading, and hide.
   { arg = "output_dir", default = "" },  # Optional export directory; empty: reuse view-results under output.uri's visualization subdirectory. Existing exports are overwritten.
-  { arg = "template", default = "configs/paraview/radiation-load.pvsm" },  # Shared layout/format; optionally use a state saved from the GUI.
+  { arg = "template", default = "configs/paraview/radiation-load.pvsm.j2" },  # Shared layout/format; optionally use a state saved from the GUI.
   { arg = "viewpoints", default = "configs/paraview/radiation-load.pvcvbc" },  # Saved camera configurations used in export mode, including projection type.
 ]
 cmd = "python scripts/view_results.py"

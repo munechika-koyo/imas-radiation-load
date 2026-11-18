@@ -391,8 +391,9 @@ GUI mode saves `scene.png`, `scene.pvsm` and `report.json` when an explicit outp
 
 ### Layouts, colors and saved views
 
-[radiation-load.pvsm](configs/paraview/radiation-load.pvsm) stores the pipelines, camera, layout, color maps and scalar bars.
-The task binds data sources from the rendering configuration; there is no separate visualization TOML.
+The shared [Jinja2 state template](configs/paraview/radiation-load.pvsm.j2) defines the pipelines, camera, layout, color maps and scalar bars.
+The task fills in the radiation URI and occurrence from the rendering configuration and sets the initial visibility of each quantity, the emissivity overlay and their legends.
+Only files ending in `.j2` are rendered with Jinja2.
 
 Adjust the scene in ParaView, save a state, and pass it as the `template` argument:
 

@@ -5179,7 +5179,7 @@
         <Domain name="bool" id="16335.SelectionVisibility.bool" />
       </Property>
       <Property name="Visibility" id="16335.Visibility" number_of_elements="1">
-        <Element index="0" value="1" />
+        <Element index="0" value="{{ (quantity == 'power') | int }}" />
         <Domain name="bool" id="16335.Visibility.bool" />
       </Property>
       <Property name="Ambient" id="16335.Ambient" number_of_elements="1">
@@ -6057,7 +6057,7 @@
         <Domain name="range" id="16335.StepSize.range" />
       </Property>
       <Property name="SuppressLOD" id="16335.SuppressLOD" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ export | int }}" />
         <Domain name="bool" id="16335.SuppressLOD.bool" />
       </Property>
       <Property name="Texture" id="16335.Texture">
@@ -6220,7 +6220,7 @@
         <Domain name="bool" id="16450.SelectionVisibility.bool" />
       </Property>
       <Property name="Visibility" id="16450.Visibility" number_of_elements="1">
-        <Element index="0" value="1" />
+        <Element index="0" value="{{ show_emissivity | int }}" />
         <Domain name="bool" id="16450.Visibility.bool" />
       </Property>
       <Property name="Ambient" id="16450.Ambient" number_of_elements="1">
@@ -7122,7 +7122,7 @@
         <Domain name="range" id="16450.StepSize.range" />
       </Property>
       <Property name="SuppressLOD" id="16450.SuppressLOD" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ export | int }}" />
         <Domain name="bool" id="16450.SuppressLOD.bool" />
       </Property>
       <Property name="Texture" id="16450.Texture">
@@ -7474,7 +7474,7 @@
         <Domain name="bool" id="16466.UseCustomLabels.bool" />
       </Property>
       <Property name="Visibility" id="16466.Visibility" number_of_elements="1">
-        <Element index="0" value="1" />
+        <Element index="0" value="{{ (quantity == 'power') | int }}" />
         <Domain name="bool" id="16466.Visibility.bool" />
       </Property>
       <Property name="WindowLocation" id="16466.WindowLocation" number_of_elements="1">
@@ -7749,7 +7749,7 @@
         <Domain name="bool" id="16472.UseCustomLabels.bool" />
       </Property>
       <Property name="Visibility" id="16472.Visibility" number_of_elements="1">
-        <Element index="0" value="1" />
+        <Element index="0" value="{{ show_emissivity | int }}" />
         <Domain name="bool" id="16472.Visibility.bool" />
       </Property>
       <Property name="WindowLocation" id="16472.WindowLocation" number_of_elements="1">
@@ -7903,15 +7903,15 @@
         <Domain name="bool" id="15879.ConvertCylToCart.bool" />
       </Property>
       <Property name="Enter URI" id="15879.Enter URI" number_of_elements="1">
-        <Element index="0" value="${RADIATION_URI}" />
+        <Element index="0" value="{{ radiation_uri }}" />
       </Property>
       <Property name="IDSAndOccurrence" id="15879.IDSAndOccurrence" number_of_elements="1">
-        <Element index="0" value="${RADIATION_IDS}" />
+        <Element index="0" value="{{ radiation_ids }}" />
         <Domain name="ids_list" id="15879.IDSAndOccurrence.ids_list">
           </Domain>
       </Property>
       <Property name="LazyLoading" id="15879.LazyLoading" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ (not show_emissivity) | int }}" />
         <Domain name="bool" id="15879.LazyLoading.bool" />
       </Property>
       <Property name="ParentIndex" id="15879.ParentIndex" number_of_elements="1">
@@ -13895,7 +13895,7 @@
         <Domain name="bool" id="31203.SelectionVisibility.bool" />
       </Property>
       <Property name="Visibility" id="31203.Visibility" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ (quantity == 'absolute') | int }}" />
         <Domain name="bool" id="31203.Visibility.bool" />
       </Property>
       <Property name="Ambient" id="31203.Ambient" number_of_elements="1">
@@ -14781,7 +14781,7 @@
         <Domain name="range" id="31203.StepSize.range" />
       </Property>
       <Property name="SuppressLOD" id="31203.SuppressLOD" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ export | int }}" />
         <Domain name="bool" id="31203.SuppressLOD.bool" />
       </Property>
       <Property name="Texture" id="31203.Texture">
@@ -14941,7 +14941,7 @@
         <Domain name="bool" id="31467.SelectionVisibility.bool" />
       </Property>
       <Property name="Visibility" id="31467.Visibility" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ (quantity == 'relative') | int }}" />
         <Domain name="bool" id="31467.Visibility.bool" />
       </Property>
       <Property name="Ambient" id="31467.Ambient" number_of_elements="1">
@@ -15827,7 +15827,7 @@
         <Domain name="range" id="31467.StepSize.range" />
       </Property>
       <Property name="SuppressLOD" id="31467.SuppressLOD" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ export | int }}" />
         <Domain name="bool" id="31467.SuppressLOD.bool" />
       </Property>
       <Property name="Texture" id="31467.Texture">
@@ -16178,7 +16178,7 @@
         <Domain name="bool" id="31223.UseCustomLabels.bool" />
       </Property>
       <Property name="Visibility" id="31223.Visibility" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ (quantity == 'absolute') | int }}" />
         <Domain name="bool" id="31223.Visibility.bool" />
       </Property>
       <Property name="WindowLocation" id="31223.WindowLocation" number_of_elements="1">
@@ -16459,7 +16459,7 @@
         <Domain name="bool" id="31486.UseCustomLabels.bool" />
       </Property>
       <Property name="Visibility" id="31486.Visibility" number_of_elements="1">
-        <Element index="0" value="0" />
+        <Element index="0" value="{{ (quantity == 'relative') | int }}" />
         <Domain name="bool" id="31486.Visibility.bool" />
       </Property>
       <Property name="WindowLocation" id="31486.WindowLocation" number_of_elements="1">

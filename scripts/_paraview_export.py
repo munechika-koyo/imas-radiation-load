@@ -124,19 +124,9 @@ def positive_range(source: Any, array: str, *, allow_nan: bool = False) -> tuple
     return minimum, zeros
 
 
-def template_color_range(path: Path, source_name: str) -> tuple[float, float]:
+def template_color_range(state: ET.Element, source_name: str) -> tuple[float, float]:
     """Recover saved scalar limits before automatic data rescaling introduces zero."""
-    state = ET.parse(path).getroot().find("ServerManagerState")
-    if state is None:
-        raise ValueError(f"Not a ParaView state: {path}")
-    source = next(
-        (
-            item
-            for item in state.findall("./ProxyCollection[@name='sources']/Item")
-            if item.get("name") == source_name
-        ),
-        None,
-    )
+    source = state.find(f"./ProxyCollection[@name='sources']/Item[@name='{source_name}']")
     if source is None:
         raise ValueError(f"Template must contain {source_name!r}")
     for proxy in state.findall("Proxy"):
@@ -166,7 +156,7 @@ def export_viewpoints(
     presets: Path,
     resolution: tuple[int, int],
     *,
-    template: Path,
+    state: ET.Element,
     source_name: str = "Radiation load components",
     filename_prefix: str = "radiation-load",
     allow_nan: bool = False,
@@ -186,7 +176,7 @@ def export_viewpoints(
     log_lower_bound_source: str | None = None
     if include_log:
         minimum, zeros = positive_range(source, array, allow_nan=allow_nan)
-        configured_minimum, _ = template_color_range(template, source_name)
+        configured_minimum, _ = template_color_range(state, source_name)
         log_minimum = configured_minimum if configured_minimum > 0 else minimum
         log_range = (max(log_minimum, linear_range[0]), linear_range[1])
         if log_range[0] == log_range[1]:
